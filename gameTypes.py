@@ -2,8 +2,8 @@ import enum
 from collections import namedtuple
 
 class Player(enum.Enum):
-    black = 1
-    white = 2
+    black = 1  # Attackers: goes first
+    white = 2  # Defenders
 
     @property
     def other(self):
@@ -15,18 +15,6 @@ class Point(namedtuple("Point", "row col")):
         return [
             Point(self.row - 1, self.col),  # Up
             Point(self.row + 1, self.col),  # Down
-            Point(self.row, self.col - 1),  # Left
-            Point(self.row, self.col + 1),  # Right
-        ]
-
-    def vert_neighbors(self):
-        return [
-            Point(self.row - 1, self.col),  # Up
-            Point(self.row + 1, self.col),  # Down
-        ]
-
-    def hor_neighbors(self):
-        return [
             Point(self.row, self.col - 1),  # Left
             Point(self.row, self.col + 1),  # Right
         ]
