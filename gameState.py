@@ -53,6 +53,7 @@ class GameState:
             return True
 
         if self._is_fortress():
+            print("Fortress detected")
             self.winner = Player.black
             return True
 
@@ -62,8 +63,8 @@ class GameState:
         legal_moves = []
         my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN, KING)
         size = self.board.size
-        corners = [Point(0, 0), Point(0, size - 1), Point(size - 1, 0), Point(size - 1, size - 1)]
-        throne = Point(size // 2, size // 2)
+        corners = self.board.corners
+        throne = self.board.throne
 
         for r in range(size):
             for c in range(size):
@@ -77,10 +78,12 @@ class GameState:
                                 break
                             if self.board.get_pawn_at(to_pos) != EMPTY:
                                 break
+                            if piece != KING and (to_pos in corners or to_pos == throne):
+                                continue
+
+
                             move = Move(from_pos, to_pos)
                             legal_moves.append(move)
-
-
 
 
     def will_capture(self, neighbor_point, player, capture_point):
@@ -123,9 +126,8 @@ class GameState:
             # King is only hostile to black pawns
             return True
 
-        size = self.board.size
-        throne = Point(size // 2, size // 2)
-        corners = [Point(0, 0), Point(0, size - 1), Point(size - 1, 0), Point(size - 1, size - 1)]
+        throne = self.board.throne
+        corners = self.board.corners
         if point in corners:
             return True
 
@@ -135,7 +137,7 @@ class GameState:
         if pawn == EMPTY:
             return False
 
-        return None
+        return False
 
     def _is_king_captured(self, king_pos):
         # Check if the king is captured by checking if it is surrounded by hostile pawns
@@ -168,9 +170,14 @@ class GameState:
                 continue
             visited.add(point)
 
+            pawn = self.board.get_pawn_at(point)
+
             # Check if the point is occupied by a white pawn
-            if self.board.get_pawn_at(point) == WHITE_PAWN:
+            if pawn == WHITE_PAWN or pawn == KING:
                 return False
+
+            if pawn == BLACK_PAWN:
+                continue
 
             # Add neighbors to the queue
             for neighbor in point.neighbors():
@@ -188,12 +195,15 @@ class GameState:
 if __name__ == '__main__':
     game_state = GameState.new_game()
     print(game_state.board)
+    print(game_state.board.grid)
     print("\n")
     new_state = game_state.apply_move(Move(Point(0, 4), Point(3, 4)))
     print(new_state.board)
     print("\n")
     new_state = new_state.apply_move(Move(Point(0, 6), Point(3, 6)))
     print(new_state.board)
+
+
 
 
 
