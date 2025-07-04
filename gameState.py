@@ -1,5 +1,6 @@
 from collections import deque
 import numpy as np
+import random
 
 from gameTypes import Player, Point
 from board import Board
@@ -26,8 +27,14 @@ class GameState:
         new_board = Board(self.board.size)
         new_board.grid = np.copy(self.board.grid)
         # ensure that the pawn being moved is the correct player's pawn
-        if self.board.get_pawn_at(move.from_pos) != (WHITE_PAWN if self.next_player == Player.white else BLACK_PAWN):
-            raise ValueError("Invalid move: not your pawn")
+        moving_pawn = self.board.get_pawn_at(move.from_pos)
+        if self.next_player == Player.white:
+            if moving_pawn not in [WHITE_PAWN, KING]:
+                raise ValueError("Invalid move: not a white pawn or king")
+        else:
+            if moving_pawn != BLACK_PAWN:
+                raise ValueError("Invalid move: not a black pawn")
+
         new_board.move_pawn(move)
 
         next_state = GameState(new_board, self.next_player.other, self, move)
@@ -63,7 +70,7 @@ class GameState:
 
     def get_legal_moves(self):
         legal_moves = []
-        my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN, KING)
+        my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
         size = self.board.size
         corners = self.board.corners
         throne = self.board.throne
@@ -86,6 +93,7 @@ class GameState:
 
                             move = Move(from_pos, to_pos)
                             legal_moves.append(move)
+
         return legal_moves
 
     def will_capture(self, opposite_point, player, capture_point):
@@ -178,18 +186,32 @@ class GameState:
         return True
 
     def _is_shield_wall(self):
+        # TODO: check if king can reach the edge of the map and if a black pawn can reach the king,
+        #  if it can reach the edge of the board and no black pawns can get to it,
+        #  then it is an exit for and white wins the game
+        king_pos = self.find_king()
         pass
+
+
 
     def _is_exit_fort(self):
         pass
 
 if __name__ == '__main__':
-    game_state = GameState.new_game(board_size=11)
-    print(game_state.board)
-    print("\n")
-    next_state = game_state.apply_move(Move(Point(0, 4), Point(3, 4)))
-    next_state = next_state.apply_move(Move(Point(4, 6), Point(4, 9)))
-    next_state = next_state.apply_move(Move(Point(0, 6), Point(3, 6)))
-    next_state = next_state.apply_move(Move(Point(6, 6), Point(6, 9)))
-    print(next_state.board)
+    # play a game with random legal moves
+    game = GameState.new_game()
+    for i in range(1000):
+        legal_moves = game.get_legal_moves()
+        if not legal_moves:
+            break  # No legal moves left, game over
+        move = random.choice(legal_moves)
+        game = game.apply_move(move)
+        #print(game.board)
+        print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
+
+        if game.is_over():
+            print(f"Game over! Winner: {game.winner}")
+            print(game.board)
+            print(i)
+            break
 
