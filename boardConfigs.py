@@ -55,10 +55,9 @@ BOARD_CONFIGS = defaultdict(dict)
 BOARD_CONFIGS[7] = {"board": board_07, "size": 7,
                     "num_attackers": 8, "num_defenders": 5, "name": "Standard 7x7 Board"}
 
-BOARD_CONFIGS[11]['standard'] = {"board": board_11, "size": 11,
+BOARD_CONFIGS[11] = {"board": board_11, "size": 11,
                      "num_attackers": 24, "num_defenders":12 , "name": "Standard 11x11 Board"}
 
-BOARD_CONFIGS[11]['fortress'] = {"board": fortress_board, "size": 11,
+BOARD_CONFIGS[11.1] = {"board": fortress_board, "size": 11,
                      "num_attackers": 24, "num_defenders":12 , "name": "Fortress Board"}
 
-print(BOARD_CONFIGS[11]['standard'])

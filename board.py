@@ -11,9 +11,9 @@ KING = 3
 
 class Board:
 
-    def __init__(self, board_size=11):
-        assert board_size == 11, "Currently only 11x11 board is supported"
-        self.size = board_size
+    def __init__(self, board=11):
+        self.board_config = BOARD_CONFIGS[board]
+        self.size = self.board_config['size']
         self.grid = np.zeros((self.size, self.size), dtype=int)
         center = self.size // 2
         self.throne = Point(center, center)
@@ -30,7 +30,7 @@ class Board:
 
     def set_up_board(self):
         self.current_player = Player.black
-        self.grid = np.copy(BOARD_CONFIGS[11]['standard']["board"])
+        self.grid = np.copy(self.board_config['board'])
 
     def is_on_board(self, point):
         return 0 <= point.row < self.size and 0 <= point.col < self.size

@@ -20,15 +20,18 @@ class GameState:
 
     @classmethod
     def new_game(cls, board_size=11):
-        return cls(Board(board_size), Player.white, None, None)
+        return cls(Board(board_size), Player.black, None, None)
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
         new_board.grid = np.copy(self.board.grid)
+        # ensure that the pawn being moved is the correct player's pawn
+        if self.board.get_pawn_at(move.from_pos) != (WHITE_PAWN if self.next_player == Player.white else BLACK_PAWN):
+            raise ValueError("Invalid move: not your pawn")
         new_board.move_pawn(move)
 
         next_state = GameState(new_board, self.next_player.other, self, move)
-        next_state._check_for_capture(move.to_pos, self.next_player, move)
+        next_state._check_for_capture(move, self.next_player)
         next_state.is_over()
         return next_state
 
@@ -53,7 +56,6 @@ class GameState:
             return True
 
         if self._is_fortress():
-            print("Fortress detected")
             self.winner = Player.black
             return True
 
@@ -84,54 +86,43 @@ class GameState:
 
                             move = Move(from_pos, to_pos)
                             legal_moves.append(move)
+        return legal_moves
 
-
-    def will_capture(self, neighbor_point, player, capture_point):
-        new_point = neighbor_point
-        if self.is_hostile(new_point, player):
+    def will_capture(self, opposite_point, player, capture_point):
+        if self.is_hostile(opposite_point, player):
             self.capture(capture_point)
-            print(f"Capture at {capture_point} by {player}.")
 
 
-    def _check_for_capture(self, point, player, move):
-        opponent_pawn = player.other.value
+    def _check_for_capture(self, move, player):
+        opponent_pawn = player.other
         # Check if the new point is adjacent to an opponent's pawn
-        d = 0 # 0:up, 1:down, 2:left, 3:right
-        for neighbor in point.neighbors():
-            if (self.board.is_on_board(neighbor) and
-                    self.board.grid[neighbor.row, neighbor.col] == opponent_pawn):
+        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # Up, Down, Left, Right
+            neighbor = Point(move.to_pos.row + dr, move.to_pos.col + dc)
+            opposite = Point(move.to_pos.row + 2 * dr, move.to_pos.col + 2 * dc)
 
-                if d == 0:  # Up
-                    self.will_capture(Point(neighbor.row - 1, neighbor.col), player, neighbor)
-                elif d == 1:  # Down
-                    self.will_capture(Point(neighbor.row + 1, neighbor.col), player, neighbor)
-                elif d == 2:  # Left
-                    self.will_capture(Point(neighbor.row, neighbor.col - 1), player, neighbor)
-                elif d == 3:  # Right
-                    self.will_capture(Point(neighbor.row, neighbor.col + 1), player, neighbor)
-
-            d += 1
+            if self.board.is_on_board(neighbor) and self.board.grid[neighbor.row, neighbor.col] == opponent_pawn.value:
+                self.will_capture(opposite, player, neighbor)
 
     def capture(self, point):
-        self.board.grid[point.row-1, point.col-1] = EMPTY
+        self.board.grid[point.row, point.col] = EMPTY
 
     def is_hostile(self, point, player):
         # Check if the point is occupied by an opponent's pawn or is a corner point or center point
         if not self.board.is_on_board(point):
             return False
         pawn = self.board.get_pawn_at(point)
-        if pawn == player.other.value:
+        if pawn == player.value:
             return True
         if pawn == KING and player == Player.black:
             # King is only hostile to black pawns
             return True
 
-        throne = self.board.throne
-        corners = self.board.corners
-        if point in corners:
+
+        if point in self.board.corners:
             return True
 
-        if point == throne and (self.board.get_pawn_at(throne) == EMPTY or self.board.get_pawn_at(throne) == player.other.value):
+        if point == self.board.throne and (self.board.get_pawn_at(self.board.throne) == EMPTY
+                                           or self.board.get_pawn_at(self.board.throne) == player.other.value):
             return True
 
         if pawn == EMPTY:
@@ -143,7 +134,7 @@ class GameState:
         # Check if the king is captured by checking if it is surrounded by hostile pawns
         attacking_pawns = 0
         for neighbor in king_pos.neighbors():
-            if not self.is_hostile(neighbor, self.next_player):
+            if not self.is_hostile(neighbor, Player.black):
                 return False
             if self.board.get_pawn_at(neighbor) == BLACK_PAWN:
                 attacking_pawns += 1
@@ -193,19 +184,12 @@ class GameState:
         pass
 
 if __name__ == '__main__':
-    game_state = GameState.new_game()
+    game_state = GameState.new_game(board_size=11)
     print(game_state.board)
-    print(game_state.board.grid)
     print("\n")
-    new_state = game_state.apply_move(Move(Point(0, 4), Point(3, 4)))
-    print(new_state.board)
-    print("\n")
-    new_state = new_state.apply_move(Move(Point(0, 6), Point(3, 6)))
-    print(new_state.board)
-
-
-
-
-
-
+    next_state = game_state.apply_move(Move(Point(0, 4), Point(3, 4)))
+    next_state = next_state.apply_move(Move(Point(4, 6), Point(4, 9)))
+    next_state = next_state.apply_move(Move(Point(0, 6), Point(3, 6)))
+    next_state = next_state.apply_move(Move(Point(6, 6), Point(6, 9)))
+    print(next_state.board)
 
