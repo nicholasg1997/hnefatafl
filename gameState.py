@@ -68,6 +68,20 @@ class GameState:
 
         return False
 
+    def is_move_legal(self, move):
+        if not self.board.is_on_board(move.to_pos) or not self.board.is_on_board(move.from_pos):
+            return False
+        if self.board.get_pawn_at(move.to_pos) != EMPTY:
+            return False
+        piece = self.board.get_pawn_at(move.from_pos)
+        if piece != KING and (move.to_pos in self.board.corners or move.to_pos == self.board.throne):
+            return False
+        my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
+        if piece not in my_pawns:
+            return False
+
+        return True
+
     def get_legal_moves(self):
         legal_moves = []
         my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
