@@ -1,4 +1,5 @@
-
+import random
+from gameState import GameState
 
 class Agent():
     def select_move(selfself, game_state):
@@ -20,3 +21,17 @@ class Agent():
         :return: A string containing diagnostic information.
         """
         return {}
+
+
+class RandomAgent(Agent):
+    def select_move(self, game_state):
+        """
+        Selects a random legal move from the current game state.
+
+        :param game_state: The current state of the game.
+        :return: A Move object representing the selected move.
+        """
+        legal_moves = game_state.get_legal_moves()
+        if not legal_moves:
+            raise ValueError("No legal moves available.")
+        return random.choice(legal_moves)
