@@ -69,6 +69,18 @@ class GameState:
         return False
 
     def get_legal_moves(self):
+        """
+        Calculate all legal moves for the current player based on the state of the board. A move
+        is considered legal if it adheres to the rules of movement, avoiding obstacles and respecting
+        any specific pawn or king constraints.
+
+        The function inspects all pawns of the current player and determines their potential destinations
+        on the board by iterating through possible directions (up, down, left, right). It handles special
+        cases such as restricted movement for non-king pawns near the throne or corners.
+
+        :return: A list of all unique legal moves available for the current player
+        :rtype: list[Move]
+        """
         legal_moves = []
         my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
         size = self.board.size
