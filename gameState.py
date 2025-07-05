@@ -86,26 +86,20 @@ class GameState:
         legal_moves = []
         my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
         size = self.board.size
-        corners = self.board.corners
-        throne = self.board.throne
 
         for r in range(size):
             for c in range(size):
-                piece = self.board.grid[r, c]
-                if piece in my_pawns:
+                if self.board.grid[r, c] in my_pawns:
                     from_pos = Point(r, c)
-                    for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                        for distance in range(1, size):
-                            to_pos = Point(r + dr * distance, c + dc * distance)
-                            if not self.board.is_on_board(to_pos):
-                                break
-                            if self.board.get_pawn_at(to_pos) != EMPTY:
-                                break
-                            if piece != KING and (to_pos in corners or to_pos == throne):
-                                continue
 
+                    for r_to in range(size):
+                        move = Move(from_pos, Point(r_to, c))
+                        if self.is_move_legal(move):
+                            legal_moves.append(move)
 
-                            move = Move(from_pos, to_pos)
+                    for c_to in range(size):
+                        move = Move(from_pos, Point(r, c_to))
+                        if self.is_move_legal(move):
                             legal_moves.append(move)
 
         return list(set(legal_moves))
