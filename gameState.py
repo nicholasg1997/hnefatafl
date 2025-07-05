@@ -94,7 +94,7 @@ class GameState:
                             move = Move(from_pos, to_pos)
                             legal_moves.append(move)
 
-        return legal_moves
+        return list(set(legal_moves))
 
     def will_capture(self, opposite_point, player, capture_point):
         if self.is_hostile(opposite_point, player):
