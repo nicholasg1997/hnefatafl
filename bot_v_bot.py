@@ -1,12 +1,12 @@
 from gameState import GameState
-from agent import RandomAgent
+from agent import RandomAgent, HumanAgent
 from gameTypes import Player
 
 def main():
     game = GameState.new_game()
     bots = {
         Player.black: RandomAgent(),
-        Player.white: RandomAgent()
+        Player.white: HumanAgent()
     }
 
     for i in range(5000):
