@@ -2,6 +2,18 @@ from gameTypes import Player
 import random
 import agent
 import numpy as np
+from multiprocessing import Pool, cpu_count
+
+def run_simulation(args):
+    """
+    Runs a simulation starting from the provided game state.
+
+    :param args: Tuple containing (node, game_state)
+    :return: Tuple (node, winner)
+    """
+    node, game_state = args
+    winner = MCTSAgent.simulate(game_state)
+    return node, winner
 
 class MCTSNode(object):
     def __init__(self, game_state, parent=None, move=None):
@@ -22,55 +34,32 @@ class MCTSNode(object):
         return child_node
 
     def record_win(self, winner):
-        """
-        Records a win for the specified player.
-
-        :param winner: The player who won the game.
-        """
         self.win_counts[winner] += 1
         self.num_rollouts += 1
 
     def can_add_child(self):
-        """
-        Checks if there are any untried moves left to add as children.
-
-        :return: True if there are untried moves, False otherwise.
-        """
         return len(self.untried_moves) > 0
 
     def is_terminal(self):
-        """
-        Checks if the current game state is terminal (i.e., the game is over).
-
-        :return: True if the game is over, False otherwise.
-        """
         return self.game_state.is_over()
 
     def winning_frac(self, player):
-        """
-        Calculates the winning fraction for the specified player.
-
-        :param player: The player for whom to calculate the winning fraction.
-        :return: The winning fraction for the specified player.
-        """
         if self.num_rollouts == 0:
             return 0
         return float(self.win_counts[player]) / float(self.num_rollouts)
 
-class MCTSAgent(agent.Agent):
-    def __init__(self, num_rounds=1000, temperature=np.sqrt(2)):
-        """
-        Initializes the MCTS agent with the specified number of rounds and temperature.
 
-        :param num_rounds: The number of rounds to simulate in the MCTS.
-        :param temperature: The temperature parameter for exploration.
-        """
+class MCTSAgent(agent.Agent):
+    def __init__(self, num_rounds=1000, temperature=np.sqrt(2), num_processes=None):
         agent.Agent.__init__(self)
         self.num_rounds = num_rounds
         self.temperature = temperature
+        self.num_processes = num_processes if num_processes is not None else cpu_count()
 
     def select_move(self, game_state):
         root = MCTSNode(game_state)
+
+        simulations = []
         for _ in range(self.num_rounds):
             node = root
             while (not node.can_add_child()) and (not node.is_terminal()):
@@ -79,8 +68,12 @@ class MCTSAgent(agent.Agent):
             if node.can_add_child():
                 node = node.add_random_move()
 
-            winner = self.simulate(node.game_state)
+            simulations.append((node, node.game_state))
 
+        with Pool(processes=self.num_processes) as pool:
+            results = pool.map(run_simulation, simulations)
+
+        for node, winner in results:
             while node is not None:
                 node.record_win(winner)
                 node = node.parent
@@ -92,6 +85,7 @@ class MCTSAgent(agent.Agent):
             if value > best_value:
                 best_value = value
                 best_move = child.move
+
         print(f"Best move: {best_move} with value {best_value}")
         return best_move
 
@@ -122,15 +116,15 @@ class MCTSAgent(agent.Agent):
             game = game.apply_move(move)
         return game.winner
 
+
 if __name__ == "__main__":
     from gameState import GameState
 
-    # Run a sample game with MCTS agent
     game = GameState.new_game()
-    mcts_agent = MCTSAgent(num_rounds=10)
+    mcts_agent = MCTSAgent(num_rounds=500)
 
     for i in range(5000):
-        print(f"move {i + 1}")
+        print(f"Move {i + 1}")
         move = mcts_agent.select_move(game)
         print(f"MCTS Agent move: {move}")
         game = game.apply_move(move)
