@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
     # Run a sample game with MCTS agent
     game = GameState.new_game()
-    mcts_agent = MCTSAgent(num_rounds=10)
+    mcts_agent = MCTSAgent(num_rounds=50)
 
     for i in range(5000):
         print(f"move {i + 1}")

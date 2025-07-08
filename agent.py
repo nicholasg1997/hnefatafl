@@ -34,6 +34,7 @@ class RandomAgent(Agent):
         """
         legal_moves = game_state.get_legal_moves()
         if not legal_moves:
+            print(legal_moves)
             raise ValueError("No legal moves available.")
         return random.choice(legal_moves)
 

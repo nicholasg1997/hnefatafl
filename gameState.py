@@ -1,6 +1,8 @@
 from collections import deque
 import numpy as np
 import random
+import copy
+from collections import Counter
 
 from gameTypes import Player, Point
 from board import Board
@@ -25,7 +27,7 @@ class GameState:
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
-        new_board.grid = np.copy(self.board.grid)
+        new_board.grid = copy.deepcopy(self.board.grid)
         # ensure that the pawn being moved is the correct player's pawn
         moving_pawn = self.board.get_pawn_at(move.from_pos)
         if self.next_player == Player.white:
@@ -64,6 +66,15 @@ class GameState:
 
         if self._is_fortress():
             self.winner = Player.black
+            return True
+
+        flattened_board = self.board.grid.flatten()
+        counts = Counter(flattened_board)
+        if counts[WHITE_PAWN] == 0 and counts[KING] == 0:
+            self.winner = Player.black
+            return True
+        if counts[BLACK_PAWN] == 0:
+            self.winner = Player.white
             return True
 
         return False
@@ -105,6 +116,10 @@ class GameState:
 
                             move = Move(from_pos, to_pos)
                             legal_moves.append(move)
+
+        if not legal_moves:
+            print("No legal moves found.")
+            print(self.board)
 
         return list(set(legal_moves))
 

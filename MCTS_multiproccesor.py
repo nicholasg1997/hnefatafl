@@ -4,18 +4,7 @@ import agent
 import numpy as np
 from multiprocessing import Pool, cpu_count
 
-def run_simulation(args):
-    """
-    Runs a simulation starting from the provided game state.
-
-    :param args: Tuple containing (node, game_state)
-    :return: Tuple (node, winner)
-    """
-    node, game_state = args
-    winner = MCTSAgent.simulate(game_state)
-    return node, winner
-
-class MCTSNode(object):
+class MCTSNode:
     def __init__(self, game_state, parent=None, move=None):
         self.game_state = game_state
         self.parent = parent
@@ -49,12 +38,24 @@ class MCTSNode(object):
         return float(self.win_counts[player]) / float(self.num_rollouts)
 
 
+def simulate(game):
+    bots = {
+        Player.black: agent.RandomAgent(),
+        Player.white: agent.RandomAgent()
+    }
+    while not game.is_over():
+        move = bots[game.next_player].select_move(game)
+        game = game.apply_move(move)
+    return game.winner
+
+
 class MCTSAgent(agent.Agent):
-    def __init__(self, num_rounds=1000, temperature=np.sqrt(2), num_processes=None):
+    def __init__(self, num_rounds=1000, temperature=np.sqrt(2), num_processes=None, selection_strategy='value'):
         agent.Agent.__init__(self)
         self.num_rounds = num_rounds
         self.temperature = temperature
         self.num_processes = num_processes if num_processes is not None else cpu_count()
+        self.selection_strategy = selection_strategy
 
     def select_move(self, game_state):
         root = MCTSNode(game_state)
@@ -70,23 +71,18 @@ class MCTSAgent(agent.Agent):
 
             simulations.append((node, node.game_state))
 
+        # Simulate all games in parallel
         with Pool(processes=self.num_processes) as pool:
-            results = pool.map(run_simulation, simulations)
+            results = pool.map(simulate, [sim[1] for sim in simulations])
 
-        for node, winner in results:
-            while node is not None:
-                node.record_win(winner)
-                node = node.parent
+        # Backpropagate results
+        for (node, _), winner in zip(simulations, results):
+            current_node = node
+            while current_node is not None:
+                current_node.record_win(winner)
+                current_node = current_node.parent
 
-        best_move = None
-        best_value = -1.0
-        for child in root.children:
-            value = child.winning_frac(game_state.next_player)
-            if value > best_value:
-                best_value = value
-                best_move = child.move
-
-        print(f"Best move: {best_move} with value {best_value}")
+        best_move = self._select_best_move(root, game_state.next_player)
         return best_move
 
     def select_child(self, node):
@@ -94,7 +90,7 @@ class MCTSAgent(agent.Agent):
         log_rollouts = np.log(total_rollouts) if total_rollouts > 0 else 1
 
         best_value = -1.0
-        best_child = []
+        best_child = None
 
         for child in node.children:
             win_ratio = child.winning_frac(node.game_state.next_player)
@@ -105,23 +101,41 @@ class MCTSAgent(agent.Agent):
                 best_child = child
         return best_child
 
-    @staticmethod
-    def simulate(game):
-        bots = {
-            Player.black: agent.RandomAgent(),
-            Player.white: agent.RandomAgent()
-        }
-        while not game.is_over():
-            move = bots[game.next_player].select_move(game)
-            game = game.apply_move(move)
-        return game.winner
+    def _select_best_move(self, root, player):
+        if not root.children:
+            print("No children found. Cannot select a move.")
+            return None
+
+        if self.selection_strategy == 'visits':
+            best_value = -1
+            best_move = None
+            for child in root.children:
+                if child.num_rollouts > best_value:
+                    best_value = child.num_rollouts
+                    best_move = child.move
+            print(f"Best move: {best_move} with {best_value} visits.")
+            return best_move
+
+        elif self.selection_strategy == 'value':
+            best_value = -1.0
+            best_move = None
+            for child in root.children:
+                value = child.winning_frac(player)
+                if value > best_value:
+                    best_value = value
+                    best_move = child.move
+            print(f"Best move: {best_move} with value {best_value}.")
+            return best_move
+
+        else:
+            raise ValueError("Invalid selection strategy. Use 'visits' or 'value'.")
 
 
 if __name__ == "__main__":
     from gameState import GameState
 
     game = GameState.new_game()
-    mcts_agent = MCTSAgent(num_rounds=500)
+    mcts_agent = MCTSAgent(num_rounds=1_000, selection_strategy='value')
 
     for i in range(5000):
         print(f"Move {i + 1}")

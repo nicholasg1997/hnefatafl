@@ -50,7 +50,23 @@ fortress_board = [ # for testing fortress detection
     [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0],
 ]
 
+no_legal_error_board = [
+    [0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0],
+    [0, 0, 0, 2, 2, 0, 0, 0, 1, 0, 1],
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 2, 0, 0, 0, 2, 2, 1, 0, 0, 0],
+    [0, 0, 0, 0, 0, 3, 2, 0, 0, 0, 1],
+    [1, 1, 0, 0, 0, 2, 0, 0, 0, 0, 1],
+    [0, 0, 0, 1, 2, 2, 2, 0, 0, 1, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 0, 2, 0, 0, 0, 1, 0, 2, 0, 0],
+    [0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+]
+
 BOARD_CONFIGS = defaultdict(dict)
+
+
 
 BOARD_CONFIGS[7] = {"board": board_07, "size": 7,
                     "num_attackers": 8, "num_defenders": 5, "name": "Standard 7x7 Board"}
@@ -60,4 +76,6 @@ BOARD_CONFIGS[11] = {"board": board_11, "size": 11,
 
 BOARD_CONFIGS[11.1] = {"board": fortress_board, "size": 11,
                      "num_attackers": 24, "num_defenders":12 , "name": "Fortress Board"}
+
+BOARD_CONFIGS[11.2] = {"board": no_legal_error_board, "size": 11,}
 
