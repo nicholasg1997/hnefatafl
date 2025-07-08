@@ -1,8 +1,8 @@
-from gameTypes import Player
-import agent
+from hnefatafl.core.gameTypes import Player
+from hnefatafl.agents.agent import Agent
 import numpy as np
 from multiprocessing import Pool, cpu_count
-from MCTS import MCTSNode
+from hnefatafl.agents.mcts.MCTS import MCTSNode
 import random
 
 
@@ -23,7 +23,7 @@ def simulate(game):
     return current_game_state.winner
 
 
-class MCTSAgent(agent.Agent):
+class MCTSAgent(Agent):
     def __init__(self, num_rounds=200, temperature=np.sqrt(2), rollouts_per_leaf=None, selection_strategy='visits'):
         """
         Initializes the MCTS agent.
@@ -33,7 +33,7 @@ class MCTSAgent(agent.Agent):
         :param rollouts_per_leaf: The number of parallel simulations to run for each selected leaf. Defaults to cpu_count().
         :param selection_strategy: 'visits' or 'value' for final move selection.
         """
-        agent.Agent.__init__(self)
+        Agent.__init__(self)
         self.num_rounds = num_rounds
         self.temperature = temperature
         self.rollouts_per_leaf = rollouts_per_leaf if rollouts_per_leaf is not None else cpu_count()
@@ -131,7 +131,7 @@ class MCTSAgent(agent.Agent):
 
 
 if __name__ == "__main__":
-    from gameState import GameState
+    from hnefatafl.core.gameState import GameState
     import time
 
     # A good starting point for testing is a lower number of rounds.

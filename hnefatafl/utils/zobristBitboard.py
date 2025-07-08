@@ -1,11 +1,11 @@
 import random
 import numpy as np
-from gameTypes import Player, Point
-from move import Move
+from hnefatafl.core.gameTypes import Player, Point
+from hnefatafl.core.move import Move
 import copy
 from collections import deque
 
-from boardConfigs import BOARD_CONFIGS
+from hnefatafl.core.boardConfigs import BOARD_CONFIGS
 
 # Piece constants
 EMPTY = 0
@@ -110,60 +110,73 @@ class BitBoard:
         return edges
 
     def _create_direction_masks(self):
-        """Create masks for each direction from each position"""
+        """Create masks for each direction (up, down, left, right)"""
         masks = {}
+        
+        # For each position on the board, create ray masks in all 4 directions
         for row in range(self.board_size):
             for col in range(self.board_size):
                 pos = self._pos_to_bit(row, col)
-                masks[pos] = {
-                    'north': self._create_ray_mask(row, col, -1, 0),
-                    'south': self._create_ray_mask(row, col, 1, 0),
-                    'east': self._create_ray_mask(row, col, 0, 1),
-                    'west': self._create_ray_mask(row, col, 0, -1)
-                }
+                
+                # Up direction
+                masks[(pos, 0)] = self._create_ray_mask(row, col, -1, 0)
+                # Down direction
+                masks[(pos, 1)] = self._create_ray_mask(row, col, 1, 0)
+                # Left direction
+                masks[(pos, 2)] = self._create_ray_mask(row, col, 0, -1)
+                # Right direction
+                masks[(pos, 3)] = self._create_ray_mask(row, col, 0, 1)
+                
         return masks
 
     def _create_ray_mask(self, start_row, start_col, dr, dc):
-        """Create a mask for a ray in a specific direction"""
+        """Create a bitboard mask for a ray in a given direction"""
         mask = 0
         row, col = start_row + dr, start_col + dc
+        
         while 0 <= row < self.board_size and 0 <= col < self.board_size:
             mask |= (1 << self._pos_to_bit(row, col))
             row += dr
             col += dc
+            
         return mask
 
     def set_piece(self, row, col, piece_type):
-        """Set a piece at the given position"""
+        """Set a piece on the board"""
         bit_pos = 1 << self._pos_to_bit(row, col)
-
-        # Clear the position first
-        self.clear_position(row, col)
-
-        # Set the piece
+        
+        # Clear any existing piece at this position
+        self.black_pawns &= ~bit_pos
+        self.white_pawns &= ~bit_pos
+        self.king &= ~bit_pos
+        
+        # Set the new piece
         if piece_type == BLACK_PAWN:
             self.black_pawns |= bit_pos
         elif piece_type == WHITE_PAWN:
             self.white_pawns |= bit_pos
         elif piece_type == KING:
             self.king |= bit_pos
-
-        self.all_pieces |= bit_pos
+            
+        # Update all pieces bitboard
+        self.all_pieces = self.black_pawns | self.white_pawns | self.king
 
     def clear_position(self, row, col):
-        """Clear a position"""
+        """Remove any piece from a position"""
         bit_pos = 1 << self._pos_to_bit(row, col)
-        inverse_bit = ~bit_pos
-
-        self.black_pawns &= inverse_bit
-        self.white_pawns &= inverse_bit
-        self.king &= inverse_bit
-        self.all_pieces &= inverse_bit
+        
+        # Clear any piece at this position
+        self.black_pawns &= ~bit_pos
+        self.white_pawns &= ~bit_pos
+        self.king &= ~bit_pos
+        
+        # Update all pieces bitboard
+        self.all_pieces = self.black_pawns | self.white_pawns | self.king
 
     def get_piece_at(self, row, col):
-        """Get piece type at position"""
+        """Get the piece type at a given position"""
         bit_pos = 1 << self._pos_to_bit(row, col)
-
+        
         if self.black_pawns & bit_pos:
             return BLACK_PAWN
         elif self.white_pawns & bit_pos:
@@ -180,76 +193,107 @@ class BitBoard:
         self.set_piece(to_row, to_col, piece_type)
 
     def get_sliding_moves(self, row, col, piece_type):
-        """Get all sliding moves for a piece at given position"""
+        """Get all possible sliding moves for a piece"""
         moves = []
         pos = self._pos_to_bit(row, col)
-
-        for direction, ray_mask in self.direction_masks[pos].items():
-            # Find blocking pieces
-            blockers = ray_mask & self.all_pieces
-
-            # Generate moves until first blocker
-            dr, dc = {'north': (-1, 0), 'south': (1, 0), 'east': (0, 1), 'west': (0, -1)}[direction]
-
-            current_row, current_col = row + dr, col + dc
-            while (0 <= current_row < self.board_size and 0 <= current_col < self.board_size):
-                if self.get_piece_at(current_row, current_col) != EMPTY:
-                    break
-
-                # Check if non-king pieces can move to throne/corners
-                to_pos = Point(current_row, current_col)
-                if piece_type != KING:
-                    bit_pos = 1 << self._pos_to_bit(current_row, current_col)
-                    if (bit_pos & self.corners) or (bit_pos & self.throne):
-                        current_row += dr
-                        current_col += dc
-                        continue
-
-                moves.append(Point(current_row, current_col))
-                current_row += dr
-                current_col += dc
-
+        
+        # Check all four directions
+        for direction in range(4):
+            # Get the ray mask for this position and direction
+            ray_mask = self.direction_masks.get((pos, direction), 0)
+            
+            # Find the first blocking piece in this direction
+            blocking_mask = ray_mask & self.all_pieces
+            
+            # If there's no blocking piece, we can move to any square in this direction
+            if blocking_mask == 0:
+                valid_moves_mask = ray_mask
+            else:
+                # Find the closest blocking piece
+                # This is a bit complex in pure Python without specialized bit operations
+                # We'll iterate through the ray and stop at the first blocking piece
+                valid_moves_mask = 0
+                dr, dc = [(0, -1), (0, 1), (-1, 0), (1, 0)][direction]
+                r, c = row + dr, col + dc
+                
+                while 0 <= r < self.board_size and 0 <= c < self.board_size:
+                    bit = 1 << self._pos_to_bit(r, c)
+                    if self.all_pieces & bit:
+                        break
+                    valid_moves_mask |= bit
+                    r += dr
+                    c += dc
+            
+            # For non-king pieces, exclude corners and throne
+            if piece_type != KING:
+                valid_moves_mask &= ~(self.corners | self.throne)
+                
+            # Convert valid moves mask to list of moves
+            move_mask = valid_moves_mask
+            while move_mask:
+                # Find the lowest set bit
+                move_bit = move_mask & -move_mask
+                move_mask &= ~move_bit
+                
+                # Convert bit position to board coordinates
+                to_row, to_col = self._bit_to_pos(move_bit.bit_length() - 1)
+                moves.append(Move(Point(row, col), Point(to_row, to_col)))
+                
         return moves
 
     def is_king_captured(self):
-        """Check if king is captured using bitboard operations"""
-        if not self.king:
-            return True
-
+        """Check if the king is captured"""
+        if self.king == 0:
+            return True  # King is already captured
+            
         # Find king position
-        king_pos = (self.king).bit_length() - 1
+        king_pos = self.king.bit_length() - 1
         king_row, king_col = self._bit_to_pos(king_pos)
-
-        # Check all four directions around king
-        attacking_pawns = 0
-        for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-            neighbor_row, neighbor_col = king_row + dr, king_col + dc
-
-            if 0 <= neighbor_row < self.board_size and 0 <= neighbor_col < self.board_size:
-                if not self._is_hostile_to_king(neighbor_row, neighbor_col):
-                    return False
-                if self.get_piece_at(neighbor_row, neighbor_col) == BLACK_PAWN:
-                    attacking_pawns += 1
-
-        return attacking_pawns >= 3
+        
+        # If king is on throne, it needs to be surrounded on all 4 sides
+        if self.king & self.throne:
+            # Check all 4 adjacent positions
+            for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                r, c = king_row + dr, king_col + dc
+                if not (0 <= r < self.board_size and 0 <= c < self.board_size):
+                    return False  # King is at edge, can't be captured
+                if not self._is_hostile_to_king(r, c):
+                    return False  # Not surrounded
+            return True  # King is surrounded on all 4 sides
+            
+        # If king is adjacent to throne, it needs 3 hostile pieces
+        if king_row == self.board_size // 2 and abs(king_col - self.board_size // 2) == 1 or \
+           king_col == self.board_size // 2 and abs(king_row - self.board_size // 2) == 1:
+            hostile_count = 0
+            for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                r, c = king_row + dr, king_col + dc
+                if 0 <= r < self.board_size and 0 <= c < self.board_size and self._is_hostile_to_king(r, c):
+                    hostile_count += 1
+            return hostile_count >= 3
+            
+        # Otherwise, king needs to be surrounded on all 4 sides
+        for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            r, c = king_row + dr, king_col + dc
+            if not (0 <= r < self.board_size and 0 <= c < self.board_size) or not self._is_hostile_to_king(r, c):
+                return False
+        return True
 
     def _is_hostile_to_king(self, row, col):
-        """Check if position is hostile to king"""
-        piece = self.get_piece_at(row, col)
-        if piece == BLACK_PAWN:
-            return True
-
+        """Check if a position is hostile to the king (black pawn, corner, or edge)"""
         bit_pos = 1 << self._pos_to_bit(row, col)
-
-        # Check corners
-        if bit_pos & self.corners:
+        
+        # Black pawns are hostile
+        if self.black_pawns & bit_pos:
             return True
-
-        # Check throne
-        if bit_pos & self.throne:
-            throne_piece = self.get_piece_at(self.board_size // 2, self.board_size // 2)
-            return throne_piece == EMPTY
-
+            
+        # Corners are hostile
+        if self.corners & bit_pos:
+            return True
+            
+        # Throne is hostile if empty
+        if self.throne & bit_pos and not (self.all_pieces & bit_pos):
+            return True
+            
         return False
 
     def copy(self):
@@ -259,35 +303,44 @@ class BitBoard:
         new_board.white_pawns = self.white_pawns
         new_board.king = self.king
         new_board.all_pieces = self.all_pieces
+        
+        # No need to copy the precomputed bitboards as they're the same for all boards of the same size
+        
         return new_board
 
     def from_numpy_grid(self, grid):
-        """Initialize bitboard from numpy grid"""
+        """Initialize bitboard from a numpy grid"""
         self.black_pawns = 0
         self.white_pawns = 0
         self.king = 0
-        self.all_pieces = 0
-
+        
         for row in range(self.board_size):
             for col in range(self.board_size):
                 piece = grid[row, col]
-                if piece != EMPTY:
-                    self.set_piece(row, col, piece)
-
+                if piece == BLACK_PAWN:
+                    self.black_pawns |= (1 << self._pos_to_bit(row, col))
+                elif piece == WHITE_PAWN:
+                    self.white_pawns |= (1 << self._pos_to_bit(row, col))
+                elif piece == KING:
+                    self.king |= (1 << self._pos_to_bit(row, col))
+                    
+        self.all_pieces = self.black_pawns | self.white_pawns | self.king
+        return self
 
 
 class Board:
-
+    """
+    Board representation using bitboards for efficient operations.
+    """
     def __init__(self, board=11):
         self.board_config = BOARD_CONFIGS[board]
         self.size = self.board_config['size']
         self.grid = np.zeros((self.size, self.size), dtype=int)
-
-        # Add bitboard and zobrist hash support
+        
+        # Initialize bitboard
         self.bitboard = BitBoard(self.size)
-        self.zobrist_hasher = ZobristHasher(self.size)
-        self.position_hash = 0
-
+        
+        # Set up throne and corners
         center = self.size // 2
         self.throne = Point(center, center)
         self.corners = [
@@ -296,7 +349,14 @@ class Board:
             Point(self.size - 1, 0),
             Point(self.size - 1, self.size - 1)
         ]
+        
+        # Initialize Zobrist hasher
+        self.hasher = ZobristHasher(self.size)
+        
         self.set_up_board()
+        
+        # Calculate initial hash
+        self.hash_value = self.hasher.hash_position(self.grid, Player.black)
 
     def reset(self):
         self.set_up_board()
@@ -304,10 +364,12 @@ class Board:
     def set_up_board(self):
         self.current_player = Player.black
         self.grid = np.copy(self.board_config['board'])
-
-        # Update bitboard and hash
+        
+        # Update bitboard
         self.bitboard.from_numpy_grid(self.grid)
-        self.position_hash = self.zobrist_hasher.hash_position(self.grid, self.current_player)
+        
+        # Recalculate hash
+        self.hash_value = self.hasher.hash_position(self.grid, self.current_player)
 
     def is_on_board(self, point):
         return 0 <= point.row < self.size and 0 <= point.col < self.size
@@ -315,51 +377,51 @@ class Board:
     def get_pawn_at(self, point):
         if not self.is_on_board(point):
             return None
-        # Use bitboard for faster lookup
-        return self.bitboard.get_piece_at(point.row, point.col)
+        return self.grid[point.row, point.col]
 
     def move_pawn(self, move):
         piece = self.get_pawn_at(move.from_pos)
-
-        # Update numpy grid
+        
+        # Update grid
         self.grid[move.from_pos.row, move.from_pos.col] = EMPTY
         self.grid[move.to_pos.row, move.to_pos.col] = piece
-
+        
         # Update bitboard
-        self.bitboard.move_piece(move.from_pos.row, move.from_pos.col,
-                                 move.to_pos.row, move.to_pos.col)
-
-        # Update hash incrementally
-        self.position_hash = self.zobrist_hasher.update_hash(
-            self.position_hash, move, piece, self.current_player)
+        self.bitboard.move_piece(move.from_pos.row, move.from_pos.col, move.to_pos.row, move.to_pos.col)
+        
+        # Update hash
+        self.hash_value = self.hasher.update_hash(self.hash_value, move, piece, self.current_player)
+        
+        # Toggle player
+        self.current_player = self.current_player.other
 
     def get_sliding_moves_fast(self, point):
-        """Fast move generation using bitboard"""
-        piece = self.get_pawn_at(point)
-        if piece == EMPTY:
+        """Get all sliding moves for a piece using bitboard operations"""
+        piece_type = self.get_pawn_at(point)
+        if piece_type == EMPTY:
             return []
-
-        return self.bitboard.get_sliding_moves(point.row, point.col, piece)
+        return self.bitboard.get_sliding_moves(point.row, point.col, piece_type)
 
     def is_king_captured_fast(self):
-        """Fast king capture detection using bitboard"""
+        """Check if the king is captured using bitboard operations"""
         return self.bitboard.is_king_captured()
 
     def find_king(self):
-        """Find the position of the king using bitboard"""
-        king_pos = self.bitboard.king
-        if king_pos == 0:
+        """Find the king's position"""
+        if self.bitboard.king == 0:
             return None
-        # Get the position of the king from the bitboard
-        king_index = (king_pos).bit_length() - 1
-        return Point(*self.bitboard._bit_to_pos(king_index))
+            
+        king_pos = self.bitboard.king.bit_length() - 1
+        row, col = self.bitboard._bit_to_pos(king_pos)
+        return Point(row, col)
 
     def copy(self):
-        """Create a copy of the board with bitboard support"""
-        new_board = Board(self.size)
+        """Create a deep copy of the board"""
+        new_board = Board(11)  # Create with default size
+        new_board.size = self.size
         new_board.grid = np.copy(self.grid)
         new_board.bitboard = self.bitboard.copy()
-        new_board.position_hash = self.position_hash
+        new_board.hash_value = self.hash_value
         new_board.current_player = self.current_player
         return new_board
 
@@ -371,14 +433,13 @@ class Board:
         return '\n'.join(rendered)
 
     def __hash__(self):
-        """Use Zobrist hash for fast position comparison"""
-        return self.position_hash
+        """Use Zobrist hash as the board hash"""
+        return self.hash_value
 
     def __eq__(self, other):
-        """Fast equality check using Zobrist hash"""
-        if not isinstance(other, Board):
-            return False
-        return self.position_hash == other.position_hash
+        """Check if two boards are equal"""
+        return isinstance(other, Board) and np.array_equal(self.grid, other.grid)
+
 
 class GameState:
     def __init__(self, board, next_player, previous, move):
@@ -393,9 +454,9 @@ class GameState:
         return cls(Board(board_size), Player.black, None, None)
 
     def apply_move(self, move):
-        new_board = Board(self.board.size)
-        new_board.grid = copy.deepcopy(self.board.grid)
-        # ensure that the pawn being moved is the correct player's pawn
+        new_board = self.board.copy()
+        
+        # Ensure that the pawn being moved is the correct player's pawn
         moving_pawn = self.board.get_pawn_at(move.from_pos)
         if self.next_player == Player.white:
             if moving_pawn not in [WHITE_PAWN, KING]:
@@ -405,7 +466,7 @@ class GameState:
                 raise ValueError("Invalid move: not a black pawn")
 
         new_board.move_pawn(move)
-
+        
         next_state = GameState(new_board, self.next_player.other, self, move)
         next_state._check_for_capture(move, self.next_player)
         next_state.is_over()
@@ -414,54 +475,68 @@ class GameState:
     def is_over(self):
         if self.winner is not None:
             return True
-
-        if self.board.is_king_captured_fast():
+            
+        king_pos = self.board.find_king()
+        
+        # Check if king is captured
+        if king_pos is None or self._is_king_captured(king_pos):
             self.winner = Player.black
             return True
-
-        king_pos = self.board.find_king()
-        if king_pos & self.board.corners:
+            
+        # Check if king reached a corner
+        if king_pos in self.board.corners:
             self.winner = Player.white
             return True
-
-        # TODO: Implement fortress checks and if all pawns have been captured checks
-
+            
+        # Check for fortress
+        if self._is_fortress():
+            self.winner = Player.black
+            return True
+            
+        # Check if all pieces of one side are captured
+        black_count = np.sum(self.board.grid == BLACK_PAWN)
+        white_count = np.sum(self.board.grid == WHITE_PAWN)
+        king_count = np.sum(self.board.grid == KING)
+        
+        if white_count == 0 and king_count == 0:
+            self.winner = Player.black
+            return True
+        if black_count == 0:
+            self.winner = Player.white
+            return True
+            
         return False
 
     def get_legal_moves(self):
+        """
+        Calculate all legal moves for the current player using bitboard operations.
+        """
         legal_moves = []
-
-        # Determine which pieces belong to the current player
+        my_pawns = []
+        
+        # Find all pawns of the current player
         if self.next_player == Player.white:
-            my_pawns = self.board.bitboard.white_pawns
-            my_king = self.board.bitboard.king
-            pieces_to_move = my_pawns | my_king
-        else:  # Player is black
-            pieces_to_move = self.board.bitboard.black_pawns
-
-        # Iterate through only the squares occupied by our pieces
-        while pieces_to_move > 0:
-            # Get the position of the next piece
-            piece_pos_index = (pieces_to_move).bit_length() - 1
-            row, col = self.board.bitboard._bit_to_pos(piece_pos_index)
-            from_pos = Point(row, col)
-
-            # Get all valid sliding moves for this piece using the fast bitboard method
-            # The get_sliding_moves method already handles all the logic for blockers and restricted squares.
-            end_positions = self.board.get_sliding_moves_fast(from_pos)
-
-            for to_pos in end_positions:
-                legal_moves.append(Move(from_pos, to_pos))
-
-            # Remove this piece from the bitboard so we can move to the next one
-            pieces_to_move &= ~(1 << piece_pos_index)
-
+            # White pawns and king
+            for row in range(self.board.size):
+                for col in range(self.board.size):
+                    if self.board.grid[row, col] in [WHITE_PAWN, KING]:
+                        my_pawns.append(Point(row, col))
+        else:
+            # Black pawns
+            for row in range(self.board.size):
+                for col in range(self.board.size):
+                    if self.board.grid[row, col] == BLACK_PAWN:
+                        my_pawns.append(Point(row, col))
+        
+        # Get all sliding moves for each pawn
+        for pawn in my_pawns:
+            legal_moves.extend(self.board.get_sliding_moves_fast(pawn))
+            
         return legal_moves
 
     def will_capture(self, opposite_point, player, capture_point):
         if self.is_hostile(opposite_point, player):
             self.capture(capture_point)
-
 
     def _check_for_capture(self, move, player):
         opponent_pawn = player.other
@@ -469,98 +544,83 @@ class GameState:
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:  # Up, Down, Left, Right
             neighbor = Point(move.to_pos.row + dr, move.to_pos.col + dc)
             opposite = Point(move.to_pos.row + 2 * dr, move.to_pos.col + 2 * dc)
-
+            
             if self.board.is_on_board(neighbor) and self.board.grid[neighbor.row, neighbor.col] == opponent_pawn.value:
                 self.will_capture(opposite, player, neighbor)
 
     def capture(self, point):
         self.board.grid[point.row, point.col] = EMPTY
+        
+        # Update bitboard
+        self.board.bitboard.clear_position(point.row, point.col)
 
     def is_hostile(self, point, player):
         # Check if the point is occupied by an opponent's pawn or is a corner point or center point
         if not self.board.is_on_board(point):
             return False
+            
         pawn = self.board.get_pawn_at(point)
+        
         if pawn == player.value:
             return True
+            
         if pawn == KING and player == Player.black:
             # King is only hostile to black pawns
             return True
-
-
+            
         if point in self.board.corners:
             return True
-
+            
         if point == self.board.throne and (self.board.get_pawn_at(self.board.throne) == EMPTY
                                            or self.board.get_pawn_at(self.board.throne) == player.other.value):
             return True
-
+            
         if pawn == EMPTY:
             return False
-
+            
         return False
 
     def _is_king_captured(self, king_pos):
-        # Check if the king is captured by checking if it is surrounded by hostile pawns
-        attacking_pawns = 0
-        for neighbor in king_pos.neighbors():
-            if not self.is_hostile(neighbor, Player.black):
-                return False
-            if self.board.get_pawn_at(neighbor) == BLACK_PAWN:
-                attacking_pawns += 1
-
-        return attacking_pawns >= 3
+        # Use the optimized bitboard method
+        return self.board.is_king_captured_fast()
 
     def find_king(self):
-        # Find the position of the king on the board
-        for row in range(self.board.size):
-            for col in range(self.board.size):
-                if self.board.grid[row, col] == KING:
-                    return Point(row, col)
-        return None
+        # Use the optimized bitboard method
+        return self.board.find_king()
 
     def _is_fortress(self):
-        # Determine if white is stuck in a fortress by doing a bfs from the corners of the boards. If none of the white pawns are in the search space, then it is a fortress
+        # Determine if white is stuck in a fortress by doing a BFS from the corners
         size = self.board.size
         d = deque([Point(0, 0), Point(0, size - 1), Point(size - 1, 0), Point(size - 1, size - 1)])
         visited = set()
-
+        
         while d:
             point = d.popleft()
             if point in visited or not self.board.is_on_board(point):
                 continue
             visited.add(point)
-
+            
             pawn = self.board.get_pawn_at(point)
-
-            # Check if the point is occupied by a white pawn
+            
+            # Check if the point is occupied by a white pawn or king
             if pawn == WHITE_PAWN or pawn == KING:
                 return False
-
+                
             if pawn == BLACK_PAWN:
                 continue
-
+                
             # Add neighbors to the queue
             for neighbor in point.neighbors():
                 if neighbor not in visited and self.board.is_on_board(neighbor):
                     d.append(neighbor)
+                    
         # If we reach here, it means all available points are either empty or occupied by black pawns
         return True
 
     def _is_shield_wall(self):
-        # TODO: check if king can reach the edge of the map and if a black pawn can reach the king,
-        #  if it can reach the edge of the board and no black pawns can get to it,
-        #  then it is an exit for and white wins the game
+        # TODO: check if king can reach the edge of the map and if a black pawn can reach the king
         king_pos = self.find_king()
         pass
 
-
-
     def _is_exit_fort(self):
         pass
-
-
-if __name__ == "__main__":
-    board = Board()
-    print(board)
-    print(f"Position hash: {board.position_hash}")
