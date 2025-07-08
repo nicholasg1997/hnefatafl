@@ -1,41 +1,9 @@
 from gameTypes import Player
-import random
 import agent
 import numpy as np
 from multiprocessing import Pool, cpu_count
+from MCTS import MCTSNode
 
-class MCTSNode:
-    def __init__(self, game_state, parent=None, move=None):
-        self.game_state = game_state
-        self.parent = parent
-        self.move = move
-        self.win_counts = {Player.black: 0, Player.white: 0}
-        self.num_rollouts = 0
-        self.children = []
-        self.untried_moves = game_state.get_legal_moves()
-        random.shuffle(self.untried_moves)
-
-    def add_random_move(self):
-        new_move = self.untried_moves.pop()
-        new_state = self.game_state.apply_move(new_move)
-        child_node = MCTSNode(new_state, parent=self, move=new_move)
-        self.children.append(child_node)
-        return child_node
-
-    def record_win(self, winner):
-        self.win_counts[winner] += 1
-        self.num_rollouts += 1
-
-    def can_add_child(self):
-        return len(self.untried_moves) > 0
-
-    def is_terminal(self):
-        return self.game_state.is_over()
-
-    def winning_frac(self, player):
-        if self.num_rollouts == 0:
-            return 0
-        return float(self.win_counts[player]) / float(self.num_rollouts)
 
 
 def simulate(game):
@@ -135,7 +103,7 @@ if __name__ == "__main__":
     from gameState import GameState
 
     game = GameState.new_game()
-    mcts_agent = MCTSAgent(num_rounds=1_000, selection_strategy='value')
+    mcts_agent = MCTSAgent(num_rounds=10_000, selection_strategy='value')
 
     for i in range(5000):
         print(f"Move {i + 1}")
