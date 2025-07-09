@@ -1,6 +1,6 @@
 import random
-from gameTypes import Point
-from move import Move
+from hnefatafl.core.gameTypes import Point
+from hnefatafl.core.move import Move
 
 class Agent():
     def select_move(selfself, game_state):
@@ -70,5 +70,3 @@ class HumanAgent(Agent):
         if move not in legal_moves:
             raise ValueError("Invalid move. Please try again.")
         return move
-
-

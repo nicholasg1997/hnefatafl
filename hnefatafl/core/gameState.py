@@ -4,9 +4,9 @@ import random
 import copy
 from collections import Counter
 
-from gameTypes import Player, Point
-from board import Board
-from move import Move
+from hnefatafl.core.gameTypes import Player, Point
+from hnefatafl.core.board import Board
+from hnefatafl.core.move import Move
 
 EMPTY = 0
 WHITE_PAWN = 2
@@ -241,4 +241,3 @@ if __name__ == '__main__':
             print(game.board)
             print(i)
             break
-

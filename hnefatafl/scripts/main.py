@@ -1,5 +1,5 @@
-from gameState import GameState
-from MCTS_multiproccesor import MCTSAgent
+from hnefatafl.core.gameState import GameState
+from hnefatafl.agents.mcts.MCTS_multiproccesor import MCTSAgent
 
 
 def run_game():
