@@ -121,7 +121,7 @@ class GameState:
             print("No legal moves found.")
             print(self.board)
 
-        return list(set(legal_moves))
+        return list(legal_moves)
 
     def will_capture(self, opposite_point, player, capture_point):
         if self.is_hostile(opposite_point, player):
@@ -234,7 +234,7 @@ if __name__ == '__main__':
         move = random.choice(legal_moves)
         game = game.apply_move(move)
         #print(game.board)
-        print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
+        #print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
 
         if game.is_over():
             print(f"Game over! Winner: {game.winner}")

@@ -31,3 +31,12 @@ class Move:
 
     def __str__(self):
         return f"Move(from={self.from_pos}, to={self.to_pos})"
+
+if __name__ == "__main__":
+    # Example usage
+    move = Move(Point(5, 10), Point(5, 9))
+    encoded_move = move.encode()
+    print(f"Encoded Move: {encoded_move}")
+
+    decoded_move = Move.from_encoded(2630)
+    print(f"Decoded Move: {decoded_move}")

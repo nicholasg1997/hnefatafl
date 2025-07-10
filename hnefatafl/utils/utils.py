@@ -38,7 +38,7 @@ def encode_action(from_row, from_col, direction, distance):
         raise ValueError("Row and column must be between 0 and 10 inclusive")
     if direction not in [0, 1, 2, 3]:
         raise ValueError("Direction must be one of: 0 (up), 1 (down), 2 (left), 3 (right)")
-    if not (0 <= distance <= 10):
+    if not (0 < distance <= 10):
         raise ValueError("Distance must be between 0 and 10 inclusive")
 
     return from_row * (11 * 4 * 10) + from_col * (4 * 10) + direction * 10 + (distance - 1)
@@ -50,8 +50,8 @@ def calculate_end_position(from_col, from_row, direction, distance):
     elif direction == 1:  # Down
         return Point(from_row + distance, from_col)
     elif direction == 2:  # Left
-        return Point(from_row, from_col - distance)
-    elif direction == 3:  # Right
         return Point(from_row, from_col + distance)
+    elif direction == 3:  # Right
+        return Point(from_row, from_col - distance)
     else:
         raise ValueError("Invalid direction")

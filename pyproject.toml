@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.10"
 dependencies = [
+    "h5py>=3.14.0",
     "jupyterlab>=4.4.3",
     "torch>=2.7.1",
 ]
