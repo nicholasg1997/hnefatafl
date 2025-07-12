@@ -35,6 +35,8 @@ class GameState:
                 raise ValueError("Invalid move: not a white pawn or king")
         else:
             if moving_pawn != BLACK_PAWN:
+                print(f"Invalid move: {move} for player {self.next_player}")
+                print(self.board)
                 raise ValueError("Invalid move: not a black pawn")
 
         new_board.move_pawn(move)
