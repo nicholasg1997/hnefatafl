@@ -28,7 +28,13 @@ class ZeroExperienceCollector:
     def get_dataloader(self, batch_size:int = 64):
         visit_sums = np.sum(self.visit_counts, axis=1, keepdims=True)
         policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # add very small number to avoid 0 div
-        
+
+        states_tensor = torch.tensor(self.states, dtype=torch.float32)
+        policy_tensor = torch.tensor(policy_targets, dtype=torch.float32)
+        rewards_tensor = torch.tensor(self.rewards, dtype=torch.float32)
+
+        dataset = TensorDataset(states_tensor, policy_tensor, rewards_tensor)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
 class ZeroExperienceBuffer:
     def __init__(self, states, visit_counts, rewards):
