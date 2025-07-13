@@ -32,9 +32,9 @@ def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
 
     if winner == Player.black:
         c1.complete_episode(1.0)
-        c2.complete_episode(0.0)
+        c2.complete_episode(-1.0)
     elif winner == Player.white:
-        c1.complete_episode(0.0)
+        c1.complete_episode(-1.0)
         c2.complete_episode(1.0)
     else:
         c1.complete_episode(0.0)
