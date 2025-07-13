@@ -17,8 +17,10 @@ class ZeroTreeNode:
         self.last_move = last_move
         self.total_visit_count = 1
         self.branches = {}
+        legal_moves = state.get_legal_moves()
+        print(f"legal moves avaliable: {len(legal_moves)}")
         for move, p in priors.items():
-            if state.is_valid_move(move): # not sure that this will work but im not sure that its neccesary as we mask out illegal moves
+            if move in legal_moves: # not sure that this will work but im not sure that its neccesary as we mask out illegal moves
                 self.branches[move] = Branch(p)
         self.children = {}
 
@@ -80,6 +82,9 @@ class ZeroAgent(Agent):
             n = node.visit_count(move)
             return q + self.c * p * np.sqrt(total_n) / (1 + n)
 
+        if not node.moves():
+            print("No legal moves available.")
+            return None
         return max(node.moves(), key=score_branch)
 
     def create_node(self, game_state, move=None, parent=None):
@@ -117,11 +122,12 @@ class ZeroAgent(Agent):
             new_game_state = node.state.apply_move(next_move)
             child_node = self.create_node(new_game_state, move=next_move, parent=node)
 
+            move = next_move
             value = -1 * child_node.value
-            ancestor = child_node
-            while ancestor is not None:
-                ancestor.parent.record_visit(ancestor.last_move, value)
-                ancestor = ancestor.parent
+            while node is not None:
+                node.record_visit(move, value)
+                move = node.last_move
+                node = node.parent
                 value = -1 * value
 
         visit_counts = np.zeros(self.encoder.num_moves())
