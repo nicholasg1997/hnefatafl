@@ -17,11 +17,13 @@ class ZeroTreeNode:
         self.last_move = last_move
         self.total_visit_count = 1
         self.branches = {}
-        legal_moves = state.get_legal_moves()
-        print(f"legal moves avaliable: {len(legal_moves)}")
+        #legal_moves = state.get_legal_moves()
+        #print(f"legal moves avaliable: {len(legal_moves)}")
+        #for move, p in priors.items():
+        #    if move in legal_moves:
+        #        self.branches[move] = Branch(p)
         for move, p in priors.items():
-            if move in legal_moves: # not sure that this will work but im not sure that its neccesary as we mask out illegal moves
-                self.branches[move] = Branch(p)
+            self.branches[move] = Branch(p)
         self.children = {}
 
     def moves(self):
@@ -91,12 +93,26 @@ class ZeroAgent(Agent):
         state_tensor = self.encoder.encode(game_state)
         model_input = np.array([state_tensor])
         priors, values = self.model(model_input)
-        priors = priors[0] # will proably have to change this for working in PyTorch
-        value = values[0][0] # will also have to change this
+        priors = priors[0]
+        value = values[0][0]
+
+        # --------
+        legal_moves = game_state.get_legal_moves()
+        legal_moves_mask = np.zeros_like(priors.detach().numpy(), dtype=bool)
+        for m in legal_moves:
+            legal_moves_mask[self.encoder.encode_move(m)] = True
+
+        masked_priors = priors.detach().numpy() * legal_moves_mask
+        masked_priors /= np.sum(masked_priors)
+
         move_priors = {
             self.encoder.decode_move_index(idx): p
-            for idx, p in enumerate(priors)
+            for idx, p in enumerate(masked_priors)
+            if legal_moves_mask[idx]
         }
+
+        # --------
+        #move_priors = {self.encoder.decode_move_index(idx): p for idx, p in enumerate(priors) }
         new_node = ZeroTreeNode(
             game_state, value,
             move_priors, parent, move
@@ -110,38 +126,47 @@ class ZeroAgent(Agent):
 
         for i in range(self.num_rounds):
             node = root
-            next_move = self.select_branch(node)
-
-            while node.has_child(next_move):
-                node = node.get_child(next_move)
-                if not node.is_leaf():
-                    next_move = self.select_branch(node)
-                else:
+            while not node.is_leaf():
+                move = self.select_branch(node)
+                if not node.has_child(move):
                     break
+                node = node.get_child(move)
 
-            new_game_state = node.state.apply_move(next_move)
-            child_node = self.create_node(new_game_state, move=next_move, parent=node)
+            move_to_expand = None
+            if not node.state.is_over():
+                move_to_expand = self.select_branch(node)
+                if move_to_expand is None:
+                    value = -1.0
+                else:
+                    new_state = node.state.apply_move(move_to_expand)
+                    child_node = self.create_node(new_state, move_to_expand, node)
+                    value = -child_node.value  # Negate value for opponent's perspective
+            else:
+                value = 1.0 if node.state.winner == game_state.next_player else -1.0
 
-            move = next_move
-            value = -1 * child_node.value
-            while node is not None:
-                node.record_visit(move, value)
-                move = node.last_move
-                node = node.parent
-                value = -1 * value
+            temp_node = node
+            backprop_move = move_to_expand if move_to_expand is not None else node.last_move
+            while temp_node is not None:
+                if backprop_move is None:
+                    if temp_node.parent:
+                        temp_node.parent.record_visit(backprop_move, value)
 
-        visit_counts = np.zeros(self.encoder.num_moves())
-        for move, branch in root.branches.items():
-            move_idx = self.encoder.encode_move(move)
-            visit_counts[move_idx] = branch.visit_count
+                backprop_move = temp_node.last_move
+                temp_node = temp_node.parent
+                value = -value
 
-        #policy_targets = visit_counts / np.sum(visit_counts)
+        if not root.moves():
+            return None
 
         if self.collector is not None:
-            encoded_states = self.encoder.encode(game_state)
-            self.collector.record_decision(encoded_states, visit_counts)
+            visit_counts = np.zeros(self.encoder.num_moves())
+            for move, branch in root.branches.items():
+                move_idx = self.encoder.encode_move(move)
+                visit_counts[move_idx] = branch.visit_count
+            encoded_state = self.encoder.encode(game_state)
+            self.collector.record_decision(encoded_state, visit_counts)
 
-        best_move = max(root.moves(), key=root.visit_count)
+        best_move = max(root.moves(), key=lambda m: root.visit_count(m))
         return best_move
 
 

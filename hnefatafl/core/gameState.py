@@ -32,6 +32,8 @@ class GameState:
         moving_pawn = self.board.get_pawn_at(move.from_pos)
         if self.next_player == Player.white:
             if moving_pawn not in [WHITE_PAWN, KING]:
+                print(f"Invalid move: {move} for player {self.next_player}")
+                print(self.board)
                 raise ValueError("Invalid move: not a white pawn or king")
         else:
             if moving_pawn != BLACK_PAWN:
