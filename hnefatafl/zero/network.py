@@ -9,7 +9,7 @@ class DualNetwork(pl.LightningModule):
     def __init__(self, encoder, learning_rate=0.001):
         super(DualNetwork, self).__init__()
         self.encoder = encoder
-        self.policy_head = nn.Linear(encoder.output_size, 1)
+        self.learning_rate = learning_rate
 
         input_shape = self.encoder.shape()
         num_input_channels = input_shape[0]
@@ -52,7 +52,6 @@ class DualNetwork(pl.LightningModule):
         self.save_hyperparameters('learning_rate')
 
     def forward(self, x):
-        x = x.float()
         shared_out = self.conv_body(x)
         policy_out = self.policy_head(shared_out)
         value_out = self.value_head(shared_out)

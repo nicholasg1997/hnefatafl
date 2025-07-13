@@ -1,4 +1,5 @@
 import numpy as np
+import pytorch_lightning as pl
 
 from hnefatafl.agents.agent import Agent
 
@@ -55,18 +56,17 @@ class ZeroTreeNode:
             return self.branches[move].visit_count
         return 0
 
+    def is_leaf(self):
+        return len(self.children) == 0
+
 
 class ZeroAgent(Agent):
     def __init__(self, model, encoder, rounds_per_move=1600, c=2.0):
         self.model = model
         self.encoder = encoder
-        self.collector = None
         self.num_rounds = rounds_per_move
         self.c = c
-
-    def select_move(self, game_state):
-        root = self.create_node(game_state)
-        pass
+        self.collector = None
 
     def set_collector(self, collector):
         self.collector = collector
@@ -100,8 +100,46 @@ class ZeroAgent(Agent):
             parent.add_child(move, new_node)
         return new_node
 
-    def train(self, experience, learning_rate, batch_size):
-        # This method should implement the training logic for the model
-        # using the collected experience. use PyTorch Lightning
+    def select_move(self, game_state):
+        root = self.create_node(game_state)
 
-        pass
+        for i in range(self.num_rounds):
+            node = root
+            next_move = self.select_branch(node)
+
+            while node.has_child(next_move):
+                node = node.get_child(next_move)
+                if not node.is_leaf():
+                    next_move = self.select_branch(node)
+                else:
+                    break
+
+            new_game_state = node.state.apply_move(next_move)
+            child_node = self.create_node(new_game_state, move=next_move, parent=node)
+
+            value = -1 * child_node.value
+            ancestor = child_node
+            while ancestor is not None:
+                ancestor.parent.record_visit(ancestor.last_move, value)
+                ancestor = ancestor.parent
+                value = -1 * value
+
+        visit_counts = np.zeros(self.encoder.num_moves())
+        for move, branch in root.branches.items():
+            move_idx = self.encoder.encode_move(move)
+            visit_counts[move_idx] = branch.visit_count
+
+        #policy_targets = visit_counts / np.sum(visit_counts)
+
+        if self.collector is not None:
+            encoded_states = self.encoder.encode(game_state)
+            self.collector.record_decision(encoded_states, visit_counts)
+
+        best_move = max(root.moves(), key=root.visit_count)
+        return best_move
+
+
+    def train(self, experience, batch_size, epochs):
+        dataloader = experience.get_dataloader(batch_size)
+        trainer = pl.Trainer(max_epochs=epochs)
+        trainer.fit(self.model, dataloader)
