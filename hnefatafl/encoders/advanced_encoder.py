@@ -220,7 +220,7 @@ class SevenPlaneEncoder(Encoder):
         Returns:
             int: Flat index representing the move
         """
-        return move.encode()
+        return move.encode(board_size=self.board_size[0])
 
     def decode_move_index(self, move_index):
         """
@@ -346,7 +346,7 @@ class SevenPlaneEncoder(Encoder):
 
         return best_move
 
-    def shape(self):
+    def get_shape(self):
         """Return the shape of the encoded representation"""
         return (self.total_channels, self.board_size[0], self.board_size[1])
 

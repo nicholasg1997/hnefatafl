@@ -11,7 +11,7 @@ class DualNetwork(pl.LightningModule):
         self.encoder = encoder
         self.learning_rate = learning_rate
 
-        input_shape = self.encoder.shape()
+        input_shape = self.encoder.get_shape()
         num_input_channels = input_shape[0]
 
         self.conv_body = nn.Sequential(

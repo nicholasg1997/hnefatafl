@@ -11,15 +11,17 @@ from hnefatafl.utils.nnTrainingUtils import simulate_game
 from tqdm import tqdm
 
 import torch
+BOARD_SIZE = 7
 
 def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
-    encoder = SevenPlaneEncoder(11)
+    board_size = BOARD_SIZE
+    encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
     model.load_state_dict(model_state_dict)
     model.eval()
 
-    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds)
-    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds)
+    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=32)
+    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=32)
 
     c1 = ZeroExperienceCollector()
     c2 = ZeroExperienceCollector()
@@ -29,7 +31,7 @@ def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent)
+    winner = simulate_game(black_agent, white_agent, board_size=board_size)
 
     if winner == Player.black:
         c1.complete_episode(1.0)
@@ -44,9 +46,9 @@ def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
 
 
 def main(learning_rate=0.001, batch_size=16, num_generations = 10,
-         num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=10,
+         num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=5,
          num_workers=None):
-    board_size = 11
+    board_size = BOARD_SIZE
 
     encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
@@ -84,5 +86,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations = 10,
 
 if __name__ == "__main__":
     main(num_generations=50, num_self_play_games=200, num_training_epochs=10,
-         mcts_rounds=100, batch_size=256, learning_rate=0.001,
-         num_workers=5)
+         mcts_rounds=250, batch_size=256, learning_rate=1e-4,
+         num_workers=6)
