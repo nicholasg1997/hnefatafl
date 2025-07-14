@@ -52,7 +52,8 @@ class DualNetwork(pl.LightningModule):
         self.save_hyperparameters('learning_rate')
 
     def forward(self, x):
-        x = torch.tensor(x, dtype=torch.float32)
+        if isinstance(x, np.ndarray):
+            x = torch.tensor(x, dtype=torch.float32)
         shared_out = self.conv_body(x)
         policy_out = self.policy_head(shared_out)
         value_out = self.value_head(shared_out)
