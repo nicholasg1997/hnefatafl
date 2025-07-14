@@ -126,38 +126,41 @@ class ZeroAgent(Agent):
 
         for i in range(self.num_rounds):
             node = root
-            while not node.is_leaf():
-                move = self.select_branch(node)
-                if not node.has_child(move):
-                    break
-                node = node.get_child(move)
+            next_move = self.select_branch(node)
+            while next_move is not None and node.has_child(next_move):
+                node = node.get_child(next_move)
+                next_move = self.select_branch(node)
 
-            move_to_expand = None
-            if not node.state.is_over():
-                move_to_expand = self.select_branch(node)
-                if move_to_expand is None:
+            if node.state.is_over():
+                if node.state.winner == node.state.next_player:
+                    value = 1.0
+                elif node.state.winner is None:  # Draw
+                    value = 0.0
+                else:  # Loss
+                    value = -1.0
+
+            else:
+                if next_move is None:
+                    print("No legal moves available")
                     value = -1.0
                 else:
-                    new_state = node.state.apply_move(move_to_expand)
-                    child_node = self.create_node(new_state, move_to_expand, node)
-                    value = -child_node.value  # Negate value for opponent's perspective
-            else:
-                value = 1.0 if node.state.winner == game_state.next_player else -1.0
+                    new_state = node.state.apply_move(next_move)
+                    child_node = self.create_node(new_state, move=next_move, parent=node)
+                    value = -1 * child_node.value
 
             temp_node = node
-            backprop_move = move_to_expand if move_to_expand is not None else node.last_move
+            move_for_bp = next_move
             while temp_node is not None:
-                if backprop_move is None:
-                    if temp_node.parent:
-                        temp_node.parent.record_visit(backprop_move, value)
-
-                backprop_move = temp_node.last_move
+                if move_for_bp is not None:
+                    temp_node.record_visit(move_for_bp, value)
+                move_for_bp = temp_node.last_move
                 temp_node = temp_node.parent
-                value = -value
+                value = -1 * value
 
         if not root.moves():
             return None
 
+        # --- Data collection for training ---
         if self.collector is not None:
             visit_counts = np.zeros(self.encoder.num_moves())
             for move, branch in root.branches.items():
@@ -166,8 +169,7 @@ class ZeroAgent(Agent):
             encoded_state = self.encoder.encode(game_state)
             self.collector.record_decision(encoded_state, visit_counts)
 
-        best_move = max(root.moves(), key=lambda m: root.visit_count(m))
-        return best_move
+        return max(root.moves(), key=lambda m: root.visit_count(m))
 
 
     def train(self, experience, batch_size, epochs):

@@ -2,12 +2,13 @@ import multiprocessing
 from functools import partial
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-from hnefatafl.zero.zeroagent import ZeroAgent
+from hnefatafl.zero.zeroagent_fast import ZeroAgent
 from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experiencecollector import ZeroExperienceCollector, combine_experience
 from hnefatafl.core.gameState import GameState
 from hnefatafl.core.gameTypes import Player
 from hnefatafl.utils.nnTrainingUtils import simulate_game
+from tqdm import tqdm
 
 import torch
 
@@ -63,7 +64,7 @@ def main(learning_rate=0.001, batch_size=16, num_generations = 10,
         game_runner = partial(run_self_play_game, mcts_rounds, model_state_dict, learning_rate)
 
         with multiprocessing.Pool(num_workers) as pool:
-            results = pool.map(game_runner, range(num_self_play_games))
+            results = list(tqdm(pool.imap_unordered(game_runner, range(num_self_play_games))))
 
         collectors = [collector for pair in results for collector in pair]
 
@@ -82,4 +83,6 @@ def main(learning_rate=0.001, batch_size=16, num_generations = 10,
     print("Training complete. Final model saved.")
 
 if __name__ == "__main__":
-    main(num_generations=100, num_self_play_games=50, num_training_epochs=10, mcts_rounds=100, batch_size=128, learning_rate=0.001)
+    main(num_generations=50, num_self_play_games=200, num_training_epochs=10,
+         mcts_rounds=100, batch_size=256, learning_rate=0.001,
+         num_workers=5)
