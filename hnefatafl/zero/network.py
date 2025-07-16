@@ -35,7 +35,7 @@ class DualNetwork(pl.LightningModule):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(2 * input_shape[1] * input_shape[2], self.encoder.num_moves()),
-            nn.Softmax(dim=1)
+            #nn.Softmax(dim=1)
         )
 
         self.value_head = nn.Sequential(

@@ -1,5 +1,6 @@
 import numpy as np
 import pytorch_lightning as pl
+import torch
 
 from hnefatafl.agents.agent import Agent
 
@@ -65,12 +66,16 @@ class ZeroTreeNode:
 
 
 class ZeroAgent(Agent):
-    def __init__(self, model, encoder, rounds_per_move=1600, c=2.0):
+    def __init__(self, model, encoder, rounds_per_move=1600, c=3.0, dirichlet_alpha=0.3, dirichlet_epsilon=0.25):
         self.model = model
         self.encoder = encoder
         self.num_rounds = rounds_per_move
         self.c = c
         self.collector = None
+
+        self.dirichlet_alpha = dirichlet_alpha
+        self.dirichlet_epsilon = dirichlet_epsilon
+        self.state_cache = {}
 
     def set_collector(self, collector):
         self.collector = collector
@@ -90,12 +95,19 @@ class ZeroAgent(Agent):
         return max(node.moves(), key=score_branch)
 
     def create_node(self, game_state, move=None, parent=None):
-        state_tensor = self.encoder.encode(game_state)
-        model_input = np.array([state_tensor])
-        priors, values = self.model(model_input)
-        priors = priors[0]
-        value = values[0][0]
+        # --- CACHE ---
+        state_hash = hash(str(game_state.board.grid.tobytes()) + str(game_state.next_player))
 
+        if state_hash in self.state_cache:
+            priors, value = self.state_cache[state_hash]
+        else:
+            state_tensor = self.encoder.encode(game_state)
+            model_input = np.array([state_tensor])
+            with torch.no_grad():
+                priors, values = self.model(model_input)
+            priors = priors[0]
+            value = values[0][0]
+            self.state_cache[state_hash] = (priors, value)
         # --------
         legal_moves = game_state.get_legal_moves()
         legal_moves_mask = np.zeros_like(priors.detach().numpy(), dtype=bool)
@@ -121,8 +133,28 @@ class ZeroAgent(Agent):
             parent.add_child(move, new_node)
         return new_node
 
-    def select_move(self, game_state):
+    def select_move(self, game_state, temperature=1.0, add_noise=False):
+        # check for immediate win
+        for move in game_state.get_legal_moves():
+            next_state = game_state.apply_move(move)
+            if next_state.is_over() and next_state.winner == game_state.next_player:
+                if self.collector is not None:
+                    visit_counts = np.zeros(self.encoder.num_moves())
+                    visit_counts[self.encoder.encode_move(move)] = self.num_rounds
+                    encoded_state = self.encoder.encode(game_state)
+                    self.collector.record_decision(encoded_state, visit_counts)
+                return move
+
+        self.state_cache = {}
         root = self.create_node(game_state)
+
+        if add_noise and self.dirichlet_alpha > 0:
+            moves = root.moves()
+            if moves:
+                noise = np.random.dirichlet([self.dirichlet_alpha] * len(moves))
+                for i, move in enumerate(moves):
+                    root.branches[move].prior = ((1 - self.dirichlet_epsilon) * root.branches[move].prior +
+                                                 self.dirichlet_epsilon * noise[i])
 
         for i in range(self.num_rounds):
             node = root
@@ -132,7 +164,7 @@ class ZeroAgent(Agent):
                 next_move = self.select_branch(node)
 
             if node.state.is_over():
-                if node.state.winner == node.state.next_player:
+                if node.state.winner == node.state.next_player: # Win
                     value = 1.0
                 elif node.state.winner is None:  # Draw
                     value = 0.0
@@ -169,7 +201,24 @@ class ZeroAgent(Agent):
             encoded_state = self.encoder.encode(game_state)
             self.collector.record_decision(encoded_state, visit_counts)
 
-        return max(root.moves(), key=lambda m: root.visit_count(m))
+        if temperature == 0:
+            return max(root.moves(), key=lambda m: root.visit_count(m))
+        else:
+            moves = []
+            visit_counts = []
+            for move in root.moves():
+                moves.append(move)
+                visit_counts.append(root.visit_count(move))
+
+            if not moves:
+                return None
+
+            visit_counts = np.array(visit_counts, dtype=np.float32)
+            probs = visit_counts ** (1 / temperature)
+            probs /= np.sum(probs)
+
+            move_idx = np.random.choice(len(moves), p=probs)
+            return moves[move_idx]
 
 
     def train(self, experience, batch_size, epochs):

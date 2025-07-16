@@ -5,13 +5,13 @@ from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 from hnefatafl.zero.zeroagent_fast import ZeroAgent
 from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experiencecollector import ZeroExperienceCollector, combine_experience
-from hnefatafl.core.gameState import GameState
+from hnefatafl.agents.agent import RandomAgent
 from hnefatafl.core.gameTypes import Player
 from hnefatafl.utils.nnTrainingUtils import simulate_game
 from tqdm import tqdm
 
 import torch
-BOARD_SIZE = 7
+BOARD_SIZE = 11
 
 def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
     board_size = BOARD_SIZE
@@ -20,8 +20,8 @@ def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
     model.load_state_dict(model_state_dict)
     model.eval()
 
-    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=32)
-    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=32)
+    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=25)
+    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, mcts_batch_size=25)
 
     c1 = ZeroExperienceCollector()
     c2 = ZeroExperienceCollector()
@@ -34,15 +34,44 @@ def run_self_play_game(mcts_rounds, model_state_dict, learning_rate, _):
     winner = simulate_game(black_agent, white_agent, board_size=board_size)
 
     if winner == Player.black:
+        print("Black wins!")
         c1.complete_episode(1.0)
         c2.complete_episode(-1.0)
     elif winner == Player.white:
+        print("White wins!")
         c1.complete_episode(-1.0)
         c2.complete_episode(1.0)
     else:
+        print("Draw!")
         c1.complete_episode(0.0)
         c2.complete_episode(0.0)
     return c1, c2
+
+# create function to analyze agent performance. test against another agent (either random or previously trained) 25 times as white and 25 times as black. also print one game of current agent vs itself
+def analyze_agent_performance(agent, opponent_agent, num_games=50):
+    board_size = BOARD_SIZE
+    opp_agent = opponent_agent
+    a1 = agent
+    a2 = opp_agent
+    win_counts = {Player.black: 0, Player.white: 0, None: 0}
+    for i in range(num_games):
+        print(f"Game {i + 1}/{num_games}")
+        verbose = False
+        if i == num_games:
+            verbose = True
+        winner = simulate_game(a1, a2, board_size=board_size, verbose=verbose)
+        if winner == Player.black:
+            win_counts[Player.black] += 1
+        elif winner == Player.white:
+            win_counts[Player.white] += 1
+        else:
+            win_counts[None] += 1
+    print(f"Results after {num_games} games:")
+    print(f"Black wins: {win_counts[Player.black]}")
+    print(f"White wins: {win_counts[Player.white]}")
+    print(f"Draws: {win_counts[None]}")
+
+
 
 
 def main(learning_rate=0.001, batch_size=16, num_generations = 10,
@@ -78,13 +107,17 @@ def main(learning_rate=0.001, batch_size=16, num_generations = 10,
 
         if (generation + 1) % model_save_freq == 0:
             print(f"Saving model after generation {generation + 1}")
-            torch.save(model.state_dict(), f'model_gen_{generation+1}.pth')
+            torch.save(model.state_dict(), f'models/model_gen_{generation+1}.pth')
             print("Model saved.")
+            print("Analyzing agent performance...")
+            analyze_agent_performance(agent_for_training, agent_for_training, num_games=5)
 
-    torch.save(model.state_dict(), 'model_final.pth')
+
+    torch.save(model.state_dict(), 'models/model_final.pth')
     print("Training complete. Final model saved.")
 
 if __name__ == "__main__":
-    main(num_generations=50, num_self_play_games=200, num_training_epochs=10,
-         mcts_rounds=250, batch_size=256, learning_rate=1e-4,
-         num_workers=6)
+    main(num_generations=10, num_self_play_games=200, num_training_epochs=10,
+         mcts_rounds=50, batch_size=256, learning_rate=1e-4,
+         num_workers=1, model_save_freq=1)
+

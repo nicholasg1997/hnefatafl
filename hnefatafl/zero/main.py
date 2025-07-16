@@ -4,7 +4,8 @@ from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experiencecollector import ZeroExperienceCollector, combine_experience
 from hnefatafl.core.gameState import GameState
 from hnefatafl.core.gameTypes import Player
-from hnefatafl.utils.nnTrainingUtils import simulate_game
+from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_game
+from tqdm import tqdm
 
 import torch
 
@@ -25,7 +26,7 @@ def main(learning_rate=0.01, batch_size=16, num_generations = 10,
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
         collectors = []
-        for i in range(num_self_play_games):
+        for i in tqdm(range(num_self_play_games)):
             print(f"Starting game {i + 1}/{num_self_play_games}")
 
             black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds)
@@ -39,17 +40,20 @@ def main(learning_rate=0.01, batch_size=16, num_generations = 10,
             c1.begin_episode()
             c2.begin_episode()
 
-            winner = simulate_game(black_agent, white_agent)
+            winner = simulate_game(black_agent, white_agent,max_moves=5, verbose=False)
 
             if winner == Player.black:
+                print("Black wins!")
                 c1.complete_episode(1.0)
                 c2.complete_episode(0.0)
             elif winner == Player.white:
+                print("White wins!")
                 c1.complete_episode(0.0)
                 c2.complete_episode(1.0)
             else:
-                c1.complete_episode(0.0)
-                c2.complete_episode(0.0)
+                print("Game ended in a draw.")
+                c1.complete_episode(-0.5)
+                c2.complete_episode(-0.5)
 
             collectors.append(c1)
             collectors.append(c2)
@@ -60,11 +64,11 @@ def main(learning_rate=0.01, batch_size=16, num_generations = 10,
 
         if (generation + 1) % model_save_freq == 0:
             print(f"Saving model after generation {generation + 1}")
-            torch.save(model.state_dict(), f'model_gen_{generation+1}.pth')
+            torch.save(model.state_dict(), f'models/model_gen_{generation+1}.pth')
             print("Model saved.")
 
-    torch.save(model.state_dict(), 'model_final.pth')
+    torch.save(model.state_dict(), 'models/model_final.pth')
     print("Training complete. Final model saved.")
 
 if __name__ == "__main__":
-    main(num_generations=100, num_self_play_games=50, num_training_epochs=10, mcts_rounds=100, batch_size=128, learning_rate=0.001)
+    main(num_generations=100, num_self_play_games=200, num_training_epochs=10, mcts_rounds=500, batch_size=128, learning_rate=0.001)
