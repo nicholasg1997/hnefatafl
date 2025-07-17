@@ -36,7 +36,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent, max_moves=150, verbose=False)
+    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
 
     if winner == Player.black:
         c1.complete_episode(1.0)
@@ -104,5 +104,5 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=10, mcts_rounds=500, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=10, mcts_rounds=300, batch_size=128,
          learning_rate=1e-3)
