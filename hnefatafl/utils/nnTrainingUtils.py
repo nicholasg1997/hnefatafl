@@ -67,7 +67,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
             print("Maximum move limit reached, ending game.")
             return None
     winner = game.winner
-    print(f"Game ended. Winner: {winner}")
+    print(f"Game ended in {move_count} moves. Winner: {winner}")
     return winner
 
 if __name__ == "__main__":
