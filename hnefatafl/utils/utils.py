@@ -21,27 +21,35 @@ def point_from_coords(row, col):
 def coords_from_point(point):
     return point.row, point.col
 
-def decode_action(move):
-    from_row = move // (11*4*10)
-    rem = move % (11*4*10)
+def decode_action(move, board_size):
+    max_dist = board_size - 1
+    moves_per_square = 4 * max_dist
+    moves_per_row = board_size * moves_per_square
 
-    from_col = rem // (4*10)
-    rem = rem % (4*10)
+    from_row = move // moves_per_row
+    rem = move % moves_per_row
 
-    direction = rem // 10
-    distance = (rem % 10) + 1
+    from_col = rem // moves_per_square
+    rem = rem % moves_per_square
+
+    direction = rem // max_dist
+    distance = (rem % max_dist) + 1
 
     return from_row, from_col, direction, distance
 
-def encode_action(from_row, from_col, direction, distance):
-    if not (0 <= from_row < 11 and 0 <= from_col < 11):
-        raise ValueError("Row and column must be between 0 and 10 inclusive")
+def encode_action(from_row, from_col, direction, distance, board_size):
+    max_dist = board_size - 1
+    if not (0 <= from_row < board_size and 0 <= from_col < board_size):
+        raise ValueError(f"Row and column must be between 0 and {board_size - 1} inclusive")
     if direction not in [0, 1, 2, 3]:
         raise ValueError("Direction must be one of: 0 (up), 1 (down), 2 (left), 3 (right)")
-    if not (0 <= distance <= 10):
-        raise ValueError("Distance must be between 0 and 10 inclusive")
+    if not (0 < distance <= max_dist):
+        raise ValueError(f"Distance must be between 1 and {max_dist} inclusive")
 
-    return from_row * (11 * 4 * 10) + from_col * (4 * 10) + direction * 10 + (distance - 1)
+    moves_per_square = 4 * max_dist
+    moves_per_row = board_size * moves_per_square
+
+    return from_row * moves_per_row + from_col * moves_per_square + direction * max_dist + (distance - 1)
 
 
 def calculate_end_position(from_col, from_row, direction, distance):
@@ -50,8 +58,8 @@ def calculate_end_position(from_col, from_row, direction, distance):
     elif direction == 1:  # Down
         return Point(from_row + distance, from_col)
     elif direction == 2:  # Left
-        return Point(from_row, from_col - distance)
-    elif direction == 3:  # Right
         return Point(from_row, from_col + distance)
+    elif direction == 3:  # Right
+        return Point(from_row, from_col - distance)
     else:
         raise ValueError("Invalid direction")

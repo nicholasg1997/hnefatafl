@@ -1,7 +1,7 @@
 from collections import deque
 import numpy as np
 import random
-import copy
+from numba import njit
 from collections import Counter
 
 from hnefatafl.core.gameTypes import Player, Point
@@ -12,6 +12,39 @@ EMPTY = 0
 WHITE_PAWN = 2
 BLACK_PAWN = 1
 KING = 3
+
+
+@njit
+def _get_legal_moves(grid, my_pawns, board_size, corners, throne):
+    legal_moves = []
+
+    for r in range(board_size):
+        for c in range(board_size):
+            piece = grid[r, c]
+            if piece in my_pawns:
+                for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                    for distance in range(1, board_size):
+                        to_r = r + dr * distance
+                        to_c = c + dc * distance
+
+                        if not (0 <= to_r < board_size and 0 <= to_c < board_size):
+                            break
+                        if grid[to_r, to_c] != EMPTY:
+                            break
+
+                        is_restricted = False
+                        if piece != KING:
+                            if to_r == throne[0] and to_c == throne[1]:
+                                is_restricted = True
+                            for cr, cc in corners:
+                                if to_r == cr and to_c == cc:
+                                    is_restricted = True
+                                    break
+                        if is_restricted:
+                            continue
+                        legal_moves.append((r, c, to_r, to_c))
+    return legal_moves
+
 
 class GameState:
     def __init__(self, board, next_player, previous, move):
@@ -27,14 +60,18 @@ class GameState:
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
-        new_board.grid = copy.deepcopy(self.board.grid)
+        new_board.grid = np.copy(self.board.grid)
         # ensure that the pawn being moved is the correct player's pawn
         moving_pawn = self.board.get_pawn_at(move.from_pos)
         if self.next_player == Player.white:
             if moving_pawn not in [WHITE_PAWN, KING]:
+                print(f"Invalid move: {move} for player {self.next_player}")
+                print(self.board)
                 raise ValueError("Invalid move: not a white pawn or king")
         else:
             if moving_pawn != BLACK_PAWN:
+                print(f"Invalid move: {move} for player {self.next_player}")
+                print(self.board)
                 raise ValueError("Invalid move: not a black pawn")
 
         new_board.move_pawn(move)
@@ -77,6 +114,10 @@ class GameState:
             self.winner = Player.white
             return True
 
+        if not self.get_legal_moves():
+            self.winner = self.next_player.other
+            return True
+
         return False
 
     def get_legal_moves(self):
@@ -92,36 +133,25 @@ class GameState:
         :return: A list of all unique legal moves available for the current player
         :rtype: list[Move]
         """
-        legal_moves = []
+
+        corners = np.array([[p.row, p.col] for p in self.board.corners])
+        throne = np.array([self.board.throne.row, self.board.throne.col])
+
         my_pawns = (WHITE_PAWN, KING) if self.next_player == Player.white else (BLACK_PAWN,)
-        size = self.board.size
-        corners = self.board.corners
-        throne = self.board.throne
 
-        for r in range(size):
-            for c in range(size):
-                piece = self.board.grid[r, c]
-                if piece in my_pawns:
-                    from_pos = Point(r, c)
-                    for dr, dc in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
-                        for distance in range(1, size):
-                            to_pos = Point(r + dr * distance, c + dc * distance)
-                            if not self.board.is_on_board(to_pos):
-                                break
-                            if self.board.get_pawn_at(to_pos) != EMPTY:
-                                break
-                            if piece != KING and (to_pos in corners or to_pos == throne):
-                                continue
+        moves  = _get_legal_moves(self.board.grid,
+                                  my_pawns,
+                                  self.board.size,
+                                  corners,
+                                  throne)
 
-
-                            move = Move(from_pos, to_pos)
-                            legal_moves.append(move)
-
-        if not legal_moves:
+        if not moves:
             print("No legal moves found.")
             print(self.board)
 
-        return list(set(legal_moves))
+
+        return [Move(Point(fr, fc), Point(tr, tc)) for fr, fc, tr, tc in moves]
+
 
     def will_capture(self, opposite_point, player, capture_point):
         if self.is_hostile(opposite_point, player):
@@ -234,7 +264,7 @@ if __name__ == '__main__':
         move = random.choice(legal_moves)
         game = game.apply_move(move)
         #print(game.board)
-        print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
+        #print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
 
         if game.is_over():
             print(f"Game over! Winner: {game.winner}")

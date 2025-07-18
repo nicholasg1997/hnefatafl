@@ -25,10 +25,12 @@ class Agent():
 
 
 class RandomAgent(Agent):
-    def select_move(self, game_state):
+    def select_move(self, game_state, temperature=None, add_noise=False):
         """
         Selects a random legal move from the current game state.
 
+        :param add_noise: Dummy parameter for compatibility with other agents
+        :param temperature: Dummy parameter for compatibility with other agents
         :param game_state: The current state of the game.
         :return: A Move object representing the selected move.
         """
