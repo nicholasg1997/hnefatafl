@@ -46,6 +46,7 @@ class Board:
         self.grid[move.to_pos.row, move.to_pos.col] = piece
 
     def __str__(self) -> str:
+        # TODO: render the board with row and column indices (similar to chess)
         symbols = {0: '.', 1: 'B', 2: 'W', 3: 'K'}
         rendered = []
         for row in self.grid:

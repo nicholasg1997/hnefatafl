@@ -87,15 +87,17 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
         experience = combine_experience(collectors)
         print("Training model...")
+        model.train()
         training_agent = ZeroAgent(model, encoder)
         training_agent.train(experience, batch_size, num_training_epochs)
+        print("Training complete.")
 
         if (generation + 1) % model_save_freq == 0:
             print(f"Saving model after generation {generation + 1}")
             torch.save(model.state_dict(), f'model_gen_{generation + 1}.pth')
             print("Model saved.")
-            # TODO: implememnt model evaluation againnst a baseline (random/previous agent) and save best agent.
-            #  print a game to see progress
+            # TODO: implement model evaluation against a baseline (random/previous agent) and save best agent.
+            #  number of games completed, average game length, win rate by color, etc.
             simulate_game(training_agent, training_agent, max_moves=150, verbose=True)
 
     torch.save(model.state_dict(), 'model_final.pth')
@@ -104,5 +106,5 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=10, mcts_rounds=300, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=12, mcts_rounds=300, batch_size=128,
          learning_rate=1e-3)
