@@ -74,14 +74,15 @@ if __name__ == "__main__":
     from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
     from hnefatafl.zero.zeroagent import ZeroAgent
     from hnefatafl.zero.network import DualNetwork
+    from hnefatafl.agents.agent import RandomAgent
 
     encoder = SevenPlaneEncoder(11)
-    model = RandomAgent()
-    #model.load_state_dict(torch.load('/Users/nickgault/PycharmProjects/hnefatafl/hnefatafl/zero/model.pth'))
-    #model.eval()
-    #black_agent = ZeroAgent(model, encoder, rounds_per_move=25)
-    #white_agent = ZeroAgent(model, encoder, rounds_per_move=25)
-    winner = simulate_game(model, model, verbose=True)
+    model = DualNetwork.load_from_checkpoint("/Users/nickgault/PycharmProjects/hnefatafl/hnefatafl/zero/lightning_logs/version_5/checkpoints/epoch=9-step=2740.ckpt", encoder=encoder)
+    model = model.to("mps")
+    model.eval()
+    black_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    white_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    winner = simulate_game_simple(RandomAgent(), white_agent, verbose=True, max_moves=150, temp=0.0)
     if winner is None:
         print("Game ended in a draw.")
     elif winner == Player.black:
