@@ -4,6 +4,11 @@ import torch
 
 from hnefatafl.agents.agent import Agent
 
+def softmax(x):
+    """Compute softmax values for each sets of scores in x."""
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0)
+
 class Branch:
     def __init__(self, prior):
         self.prior = prior
@@ -99,17 +104,17 @@ class ZeroAgent(Agent):
             state_tensor = self.encoder.encode(game_state)
             model_input = np.array([state_tensor])
             with torch.no_grad():
-                priors, values = self.model(model_input)
-            priors = priors[0]
+                raw_priors, values = self.model(model_input)
+            priors = softmax(raw_priors[0].detach().numpy())
             value = values[0][0]
             self.state_cache[state_hash] = (priors, value)
-        # --------
-        legal_moves = game_state.get_legal_moves()
-        legal_moves_mask = np.zeros_like(priors.detach().numpy(), dtype=bool)
-        for m in legal_moves:
-            legal_moves_mask[self.encoder.encode_move(m)] = True
 
-        masked_priors = priors.detach().numpy() * legal_moves_mask
+        legal_moves = game_state.get_legal_moves()
+        legal_moves_mask = np.zeros_like(priors, dtype=bool)
+        for m in legal_moves:
+            legal_moves_mask[self.encoder.encode_move(m)] = 1
+
+        masked_priors = priors * legal_moves_mask
         masked_priors /= np.sum(masked_priors)
 
         move_priors = {
@@ -118,7 +123,6 @@ class ZeroAgent(Agent):
             if legal_moves_mask[idx]
         }
 
-        # --------
         #move_priors = {self.encoder.decode_move_index(idx): p for idx, p in enumerate(priors) }
         new_node = ZeroTreeNode(
             game_state, value,
@@ -143,27 +147,44 @@ class ZeroAgent(Agent):
         for _ in range(self.num_rounds):
             node = root
             path = []
-            while not node.is_leaf(): # work down tree until we hit a leaf node
-                move = self.select_branch(node)
-                if move is None:
-                    print("No legal moves available, breaking out of MCTS.")
+            while True: # work down tree until we hit a leaf node
+                if not node.moves():
+                    #print("Reached leaf node.")
                     break
-                path.append((node, move))
-                node = node.get_child(move)
 
-            if node.state.is_over():  # we have reached a terminal state
-                if node.state.winner == node.state.next_player: # Win
+                move = self.select_branch(node)
+                if node.has_child(move):
+                    #print(f"Moving to child node for move: {move}")
+                    path.append((node, move))
+                    node = node.get_child(move)
+                else:
+                    break
+
+            parent_node = node
+            if parent_node.state.is_over():  # we have reached a terminal state
+                if parent_node.state.winner == parent_node.state.next_player: # Win
                     value = 1.0
-                elif node.state.winner == node.state.next_player.other:
+                elif parent_node.state.winner == parent_node.state.next_player.other:
                     value = -1.0
                 else:
-                    value = 0.0
+                    value = -0.5
+            elif 'move' not in locals() or move is None:  # no legal moves available
+                print("move is None or not in locals(), setting value to -1.0")
+                value = -1.0
             else:
-                value = self.expand_leaf_node(node)
+                #value = self.expand_leaf_node(parent_node)
+                new_state = parent_node.state.apply_move(move)
+                child_node = self.create_node(new_state, move=move, parent=parent_node)
+                value = -1 * child_node.value
+
+            if 'move' in locals() and move is not None:
+                parent_node.record_visit(move, value)
 
             for path_node, path_move in reversed(path):
+                value = -1 * value
                 path_node.record_visit(path_move, value)
-                value = -1 * value # not sure if value swapping should go here or before recording node visit
+
+            #print(f"path: {path}")
 
         # --- Data collection for training ---
         if self.collector is not None:
@@ -194,28 +215,27 @@ class ZeroAgent(Agent):
             else:
                 probs = visit_counts ** (1 / temperature)
                 probs /= np.sum(probs)
-            print(f"probs: {probs}")
+            #print(f"probs: {probs}")
 
             move_idx = np.random.choice(len(moves), p=probs)
             return moves[move_idx]
 
     def expand_leaf_node(self, node, device='mps'):
         state_hash = hash(str(node.state.board.grid.tobytes()) + str(node.state.next_player))
-        print(f"state_hash: {state_hash}")
+        #print(f"state_hash: {state_hash}")
         if state_hash in self.state_cache:
             priors, value = self.state_cache[state_hash]
-            priors = priors.detach().cpu().numpy()
-            print("Using cached priors and values.")
-            print(f"priors: {priors}\nvalues: {value}")
+            #print("Using cached priors and values.")
+            #print(f"priors: {priors}\nvalues: {value}")
+
         else:
-            print("Calculating priors and values.")
+            #print("Calculating priors and values.")
             state_tensor = self.encoder.encode(node.state)
             model_input = torch.from_numpy(np.array([state_tensor])).float().to(device)
             with torch.no_grad():
                 priors_tensor, values_tensor = self.model(model_input)
-                print(f"priors: {priors_tensor}\nvalues: {values_tensor}")
-
-            priors = priors_tensor[0].detach().cpu().numpy()
+                #print(f"priors: {priors_tensor}\nvalues: {values_tensor}")
+            priors = softmax(priors_tensor[0].detach().cpu().numpy())
             value = values_tensor[0][0].detach().cpu().numpy()
             self.state_cache[state_hash] = (priors, value)
 
@@ -225,9 +245,9 @@ class ZeroAgent(Agent):
             legal_moves_mask[self.encoder.encode_move(m)] = 1
 
         masked_priors = priors * legal_moves_mask
-        print(f"masked_priors: {masked_priors}")
+        #print(f"masked_priors: {masked_priors}")
         sum_masked_priors = np.sum(masked_priors)
-        print(f"sum_masked_priors: {sum_masked_priors}")
+        #print(f"sum_masked_priors: {sum_masked_priors}")
         if sum_masked_priors > 0:
             masked_priors /= sum_masked_priors
 
@@ -237,8 +257,6 @@ class ZeroAgent(Agent):
             node.branches[move] = Branch(prior_p)
 
         return value
-
-
 
     def train(self, experience, batch_size, epochs):
         # TODO: add early stopping, learning rate scheduling, etc.
