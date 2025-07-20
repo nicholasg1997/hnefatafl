@@ -6,7 +6,7 @@ from tqdm import tqdm
 import torch
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-from hnefatafl.zero.zeroagent import ZeroAgent
+from hnefatafl.zero.zeroagent_v2 import ZeroAgent
 from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experiencecollector import ZeroExperienceCollector, combine_experience
 from hnefatafl.core.gameTypes import Player
@@ -36,7 +36,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
+    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=True)
 
     if winner == Player.black:
         c1.complete_episode(1.0)
@@ -62,7 +62,8 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
     mcts_rounds = mcts_rounds
     model_save_freq = model_save_freq
 
-    num_workers = max(1, os.cpu_count() - 2) # leave 2 cores free to keep Mac cool
+    free_cores = 9
+    num_workers = max(1, os.cpu_count() - free_cores) # leave n cores free to keep Mac cool
     print(f"Using {num_workers} worker processes for self-play.")
 
     encoder = SevenPlaneEncoder(board_size)
@@ -94,17 +95,17 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
         if (generation + 1) % model_save_freq == 0:
             print(f"Saving model after generation {generation + 1}")
-            torch.save(model.state_dict(), f'model_gen_{generation + 1}.pth')
+            torch.save(model.state_dict(), f'models/model_gen_{generation + 1}.pth')
             print("Model saved.")
             # TODO: implement model evaluation against a baseline (random/previous agent) and save best agent.
             #  number of games completed, average game length, win rate by color, etc.
             simulate_game(training_agent, training_agent, max_moves=150, verbose=True)
 
-    torch.save(model.state_dict(), 'model_final.pth')
+    torch.save(model.state_dict(), 'models/model_final.pth')
     print("Training complete. Final model saved.")
 
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
     main(num_generations=20, num_self_play_games=200, num_training_epochs=12, mcts_rounds=300, batch_size=128,
-         learning_rate=1e-3)
+         learning_rate=1e-4)
