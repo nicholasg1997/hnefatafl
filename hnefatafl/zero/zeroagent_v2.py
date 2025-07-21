@@ -80,6 +80,9 @@ class ZeroAgent(Agent):
     def set_collector(self, collector):
         self.collector = collector
 
+    def clear_cache(self):
+        self.state_cache = {}
+
     def select_branch(self, node):
         total_n = node.total_visit_count
 
@@ -115,7 +118,11 @@ class ZeroAgent(Agent):
             legal_moves_mask[self.encoder.encode_move(m)] = 1
 
         masked_priors = priors * legal_moves_mask
-        masked_priors /= np.sum(masked_priors)
+
+        if np.sum(masked_priors) > 0:
+            masked_priors /= np.sum(masked_priors)
+        else:
+            masked_priors[legal_moves_mask] = 1.0 / np.sum(legal_moves_mask)
 
         move_priors = {
             self.encoder.decode_move_index(idx): p
@@ -125,15 +132,18 @@ class ZeroAgent(Agent):
 
         #move_priors = {self.encoder.decode_move_index(idx): p for idx, p in enumerate(priors) }
         new_node = ZeroTreeNode(
-            game_state, value,
-            move_priors, parent, move
+            game_state,
+            value,
+            move_priors,
+            parent,
+            move
         )
         if parent is not None:
             parent.add_child(move, new_node)
         return new_node
 
     def select_move(self, game_state, temperature=1.0, add_noise=False):
-        self.state_cache = {}
+        self.clear_cache()
         root = self.create_node(game_state)
 
         if add_noise and self.dirichlet_alpha > 0:
@@ -147,46 +157,41 @@ class ZeroAgent(Agent):
         for _ in range(self.num_rounds):
             node = root
             path = []
+
             while True: # work down tree until we hit a leaf node
                 if not node.moves():
-                    #print("Reached leaf node.")
+                    print("No legal moves available, breaking out of the loop.")
                     break
-
                 move = self.select_branch(node)
+
                 if node.has_child(move):
-                    #print(f"Moving to child node for move: {move}")
                     path.append((node, move))
                     node = node.get_child(move)
                 else:
                     break
 
             parent_node = node
-            if parent_node.state.is_over():  # we have reached a terminal state
-                if parent_node.state.winner == parent_node.state.next_player: # Win
-                    value = 1.0
-                elif parent_node.state.winner == parent_node.state.next_player.other:
-                    value = -1.0
-                else:
-                    value = -0.5
-            elif 'move' not in locals() or move is None:  # no legal moves available
-                print("move is None or not in locals(), setting value to -1.0")
-                value = -1.0
-            else:
-                #value = self.expand_leaf_node(parent_node)
-                new_state = parent_node.state.apply_move(move)
-                child_node = self.create_node(new_state, move=move, parent=parent_node)
-                value = -1 * child_node.value
 
-            if 'move' in locals() and move is not None:
-                parent_node.record_visit(move, value)
+            if parent_node.state.is_over():  # we have reached a terminal state
+                current_player = parent_node.state.next_player
+                winner = parent_node.state.winner
+                if winner == current_player: # Win
+                    value = 1.0
+                elif winner is None:
+                    value = -0.5
+                else:
+                    value = -1.0  # Loss
+            else:
+                new_state = parent_node.state.apply_move(move)
+                child_node = self.create_node(new_state, move, parent_node)
+                value  = -child_node.value
 
             for path_node, path_move in reversed(path):
-                value = -1 * value
+                value = -value
                 path_node.record_visit(path_move, value)
 
             #print(f"path: {path}")
 
-        # --- Data collection for training ---
         if self.collector is not None:
             visit_counts = np.zeros(self.encoder.num_moves())
             for move, branch in root.branches.items():
@@ -195,19 +200,15 @@ class ZeroAgent(Agent):
             encoded_state = self.encoder.encode(game_state)
             self.collector.record_decision(encoded_state, visit_counts)
 
+        if not root.moves():
+            print("No legal moves available, returning None.")
+            return None
+
         if temperature == 0:
             return max(root.moves(), key=lambda m: root.visit_count(m))
         else:
-            moves = []
-            visit_counts = []
-            for move in root.moves():
-                moves.append(move)
-                visit_counts.append(root.visit_count(move))
-
-            if not moves:
-                return None
-
-            visit_counts = np.array(visit_counts, dtype=np.float32)
+            moves = root.moves()
+            visit_counts = np.array([root.visit_count(m) for m in moves], dtype=np.float32)
 
             if np.sum(visit_counts) == 0:
                 print("Warning: All visit counts are zero, returning random move.")
