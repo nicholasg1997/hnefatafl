@@ -65,7 +65,7 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
     encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
 
-    persistent_buffer = PersistentExperienceBuffer(max_games=500_000)
+    persistent_buffer = PersistentExperienceBuffer(max_games=150_000)
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")

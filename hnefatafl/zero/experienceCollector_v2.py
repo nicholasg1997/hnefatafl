@@ -55,7 +55,7 @@ class ZeroExperienceBuffer:
 
     def get_dataloader(self, batch_size:int = 64, priority_alpha= 0.6):
         visit_sums = np.sum(self.visit_counts, axis=1, keepdims=True)
-        policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # add very small number to avoid 0 division error
+        policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # Add small number to avoid 0 division error
 
         priorities = np.where(self.is_result, 1.0, 0.1)  # Higher priority for terminal states
         priorities = priorities ** priority_alpha
