@@ -57,22 +57,15 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
 def main(learning_rate=0.01, batch_size=16, num_generations=10,
          num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=10):
     board_size = 11
-    num_generations = num_generations
-    learning_rate = learning_rate
-    batch_size = batch_size
-    num_self_play_games = num_self_play_games
-    num_training_epochs = num_training_epochs
-    mcts_rounds = mcts_rounds
-    model_save_freq = model_save_freq
 
-    free_cores = 2  # leave n cores free to keep Mac cool
+    free_cores = 1  # leave n cores free to keep Mac cool
     num_workers = max(1, os.cpu_count() - free_cores)
     print(f"Using {num_workers} worker processes for self-play.")
 
     encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
 
-    persistent_buffer = PersistentExperienceBuffer(max_games=1000)
+    persistent_buffer = PersistentExperienceBuffer(max_games=500_000)
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
@@ -90,13 +83,12 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
                     pbar.update(1)
 
         collectors = list(chain.from_iterable(results))
-        experience = combine_experience(collectors)
-        persistent_buffer.add_game(experience)
-        print("Training model...")
+        persistent_buffer.add_experience(collectors)
+        training_experience = persistent_buffer.get_training_buffer()
+        print(f"training_experience size: {len(training_experience)}")
         model.train()
         training_agent = ZeroAgent(model, encoder)
-        training_agent.train(experience, batch_size, num_training_epochs)
-        print("Training complete.")
+        training_agent.train(training_experience, batch_size, num_training_epochs)
 
         if (generation + 1) % model_save_freq == 0:
             print(f"Saving model after generation {generation + 1}")
@@ -112,5 +104,5 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=6, mcts_rounds=600, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=6, mcts_rounds=300, batch_size=256,
          learning_rate=1e-4)
