@@ -73,23 +73,25 @@ class ZeroExperienceBuffer:
         return len(self.states)
 
 class PersistentExperienceBuffer:
-    def __init__(self, max_games=1000):
-        self.max_games = max_games
-        self.games = deque(maxlen=max_games)
+    def __init__(self, max_games=500_000):
+        self.states = deque(maxlen=max_games)
+        self.visit_counts = deque(maxlen=max_games)
+        self.rewards = deque(maxlen=max_games)
+        self.is_result = deque(maxlen=max_games)
 
-    def add_game(self, game):
-        self.games.append(game)
+    def add_experience(self, collectors):
+        for collector in collectors:
+            self.states.extend(collector.states)
+            self.visit_counts.extend(collector.visit_counts)
+            self.rewards.extend(collector.rewards)
+            self.is_result.extend(collector.is_result)
 
-    def get_all_experience(self):
-        all_states = np.concatenate([game[0] for game in self.games])
-        all_visit_counts = np.concatenate([game[1] for game in self.games])
-        all_rewards = np.concatenate([game[2] for game in self.games])
-        all_is_result = np.concatenate([game[3] for game in self.games])
+    def get_training_buffer(self):
         return ZeroExperienceBuffer(
-            states=all_states,
-            visit_counts=all_visit_counts,
-            rewards=all_rewards,
-            is_result=all_is_result
+            states=np.array(self.states),
+            visit_counts=np.array(self.visit_counts),
+            rewards=np.array(self.rewards),
+            is_result=np.array(self.is_result)
         )
 
 
