@@ -75,9 +75,13 @@ if __name__ == "__main__":
     from hnefatafl.zero.zeroagent import ZeroAgent
     from hnefatafl.zero.network import DualNetwork
     from hnefatafl.agents.agent import RandomAgent
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[1]
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_7" / "checkpoints" / "epoch=5-step=2430.ckpt"
 
     encoder = SevenPlaneEncoder(11)
-    model = DualNetwork.load_from_checkpoint("/Users/nickgault/PycharmProjects/hnefatafl/hnefatafl/zero/lightning_logs/version_2/checkpoints/epoch=11-step=3732.ckpt", encoder=encoder)
+    model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
     model = model.to("cpu")
     model.eval()
     black_agent = ZeroAgent(model, encoder, rounds_per_move=300, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
