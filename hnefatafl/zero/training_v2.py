@@ -8,10 +8,16 @@ import numpy as np
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+from hnefatafl.agents.agent import RandomAgent
+#from hnefatafl.zero.zeroagent_fast import ZeroAgent
 from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, PersistentExperienceBuffer, combine_experience
 from hnefatafl.core.gameTypes import Player
 from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_game
+from pathlib import Path
+
+project_root = Path(__file__).resolve().parents[1]
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_10" / "checkpoints" / "epoch=5-step=4950.ckpt"
 
 
 def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
@@ -25,8 +31,10 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     Returns:
         tuple: Two ZeroExperienceCollector instances for black and white agents.
     """
+
     model = DualNetwork(encoder)
     model.load_state_dict(model_state_dict)
+    model.to('cpu')
 
     black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
     white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
@@ -39,7 +47,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
+    winner = simulate_game(black_agent, white_agent, max_moves=500, verbose=False)
 
     if winner == Player.black:
         c1.complete_episode(1.0, is_result=True)
@@ -48,13 +56,13 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
         c1.complete_episode(-1.0, is_result=True)
         c2.complete_episode(1.0, is_result=True)
     else:  # Draw
-        c1.complete_episode(-0.75, is_result=False)
-        c2.complete_episode(-0.75, is_result=False)
+        c1.complete_episode(-1.0, is_result=False)
+        c2.complete_episode(-1.0, is_result=False)
 
     return c1, c2
 
 
-def main(learning_rate=0.01, batch_size=16, num_generations=10,
+def main(learning_rate=0.001, batch_size=16, num_generations=10,
          num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=10):
     board_size = 11
 
@@ -64,13 +72,15 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
     encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
+    #print("Loading model from checkpoint...")
+    #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
 
     persistent_buffer = PersistentExperienceBuffer(max_games=150_000)
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
 
-        model.cpu()
+        #model.cpu()
         model.eval()
         model_state_dict = model.state_dict()
 
@@ -96,7 +106,7 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
             print("Model saved.")
             # TODO: implement model evaluation against a baseline (random/previous agent) and save best agent.
             #  number of games completed, average game length, win rate by color, etc.
-            simulate_game(training_agent, training_agent, max_moves=150, verbose=True, temp=0.0)
+            simulate_game(RandomAgent, training_agent, max_moves=150, verbose=True, temp=0.0)
 
     torch.save(model.state_dict(), 'models/model_final.pth')
     print("Training complete. Final model saved.")
@@ -104,5 +114,5 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=6, mcts_rounds=300, batch_size=256,
-         learning_rate=1e-4)
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=5, mcts_rounds=200, batch_size=128,
+         learning_rate=0.001, model_save_freq=5)

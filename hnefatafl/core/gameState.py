@@ -47,16 +47,22 @@ def _get_legal_moves(grid, my_pawns, board_size, corners, throne):
 
 
 class GameState:
-    def __init__(self, board, next_player, previous, move):
+    def __init__(self, board, next_player, previous, move, history=None):
         self.board = board
         self.next_player = next_player
         self.previous = previous
         self.last_move = move
         self.winner = None
 
+        self.history = history if history is not None else Counter()
+        current_hash = (self.board.grid.tobytes(), self.next_player)
+        self.history[current_hash] += 1
+        self.repetition_hit = False
+
+
     @classmethod
     def new_game(cls, board_size=11):
-        return cls(Board(board_size), Player.black, None, None)
+        return cls(Board(board_size), Player.black, previous=None, move=None, history=Counter())
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
@@ -76,13 +82,20 @@ class GameState:
 
         new_board.move_pawn(move)
 
-        next_state = GameState(new_board, self.next_player.other, self, move)
+        next_state = GameState(new_board, self.next_player.other, self, move, self.history.copy())
         next_state._check_for_capture(move, self.next_player)
         next_state.is_over()
         return next_state
 
     def is_over(self):
         if self.winner is not None:
+            return True
+
+        current_hash = (self.board.grid.tobytes(), self.next_player)
+        if self.history[current_hash] >= 3:
+            #print(f"repetition detected, game over for player {self.next_player.other}")
+            self.winner = self.next_player
+            self.repetition_hit = True
             return True
 
         king_pos = self.find_king()
@@ -133,6 +146,7 @@ class GameState:
         :return: A list of all unique legal moves available for the current player
         :rtype: list[Move]
         """
+        # TODO: add Ko style repetition detection
 
         corners = np.array([[p.row, p.col] for p in self.board.corners])
         throne = np.array([self.board.throne.row, self.board.throne.col])
@@ -175,13 +189,13 @@ class GameState:
         # Check if the point is occupied by an opponent's pawn or is a corner point or center point
         if not self.board.is_on_board(point):
             return False
+
         pawn = self.board.get_pawn_at(point)
         if pawn == player.value:
             return True
         if pawn == KING and player == Player.black:
             # King is only hostile to black pawns
             return True
-
 
         if point in self.board.corners:
             return True

@@ -1,3 +1,5 @@
+from sched import scheduler
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -30,11 +32,11 @@ class DualNetwork(pl.LightningModule):
         )
 
         self.policy_head = nn.Sequential(
-            nn.Conv2d(in_channels=64, out_channels=2, kernel_size=1),
-            nn.BatchNorm2d(2),
+            nn.Conv2d(in_channels=64, out_channels=4, kernel_size=1),
+            nn.BatchNorm2d(4),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(2 * input_shape[1] * input_shape[2], self.encoder.num_moves()),
+            nn.Linear(4 * input_shape[1] * input_shape[2], self.encoder.num_moves()),
             #nn.Softmax(dim=1)
         )
 
@@ -75,8 +77,18 @@ class DualNetwork(pl.LightningModule):
 
     def configure_optimizers(self, optimizer='adam'):
         if optimizer.lower() == 'adam':
-            return optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+            optimizer =  optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
         elif optimizer.lower() == 'sgd':
-            return optim.SGD(self.parameters(), lr=self.hparams.learning_rate, momentum=0.9)
+            optimizer =  optim.SGD(self.parameters(), lr=self.hparams.learning_rate, momentum=0.9)
         else:
             raise ValueError(f"Unsupported optimizer: {optimizer}. Use 'adam' or 'sgd'.")
+
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        return {
+            'optimizer': optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'interval': 'epoch',
+                'frequency': 1
+            }
+        }

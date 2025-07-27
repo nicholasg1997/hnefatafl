@@ -1,7 +1,7 @@
 import torch
 import numpy as np
+import time
 
-from hnefatafl.agents.agent import RandomAgent
 from hnefatafl.core.gameState import GameState
 from hnefatafl.core.gameTypes import Player
 
@@ -48,8 +48,9 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
     }
     move_count = 0
     while not game.is_over():
+        time_start = time.time()
         is_exploring = move_count < 30
-        temperature = temp if is_exploring else 0.0
+        temperature = temp if is_exploring else 0.1
         add_noise = is_exploring
 
         next_move = agents[game.next_player].select_move(game, temperature=temperature, add_noise=add_noise)
@@ -60,33 +61,39 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
 
         game = game.apply_move(next_move)
         if verbose:
-            print(f"Move {move_count + 1}: {game.last_move}")
+            print(f"Move {move_count + 1}: {game.last_move} by {game.next_player.other}")
             print(game.board)
         move_count += 1
+        end_time = time.time()
+        if verbose:
+            print(f"Move {move_count}: {game.last_move} took {end_time - time_start:.2f} seconds")
         if move_count > max_moves:
             print("Maximum move limit reached, ending game.")
             return None
     winner = game.winner
-    print(f"Game ended in {move_count} moves. Winner: {winner}")
+    print(f"Game ended in {move_count} moves. Winner: {winner}, duplication detected:{game.repetition_hit}")
     return winner
 
 if __name__ == "__main__":
     from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-    from hnefatafl.zero.zeroagent import ZeroAgent
+    from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+    #from hnefatafl.zero.zeroagent_fast import ZeroAgent
     from hnefatafl.zero.network import DualNetwork
     from hnefatafl.agents.agent import RandomAgent
+
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_7" / "checkpoints" / "epoch=5-step=2430.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_1" / "checkpoints" / "epoch=4-step=4635.ckpt"
 
     encoder = SevenPlaneEncoder(11)
     model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    #model = DualNetwork(encoder)
     model = model.to("cpu")
     model.eval()
-    black_agent = ZeroAgent(model, encoder, rounds_per_move=300, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    white_agent = ZeroAgent(model, encoder, rounds_per_move=300, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    winner = simulate_game_simple(black_agent, white_agent, verbose=True, max_moves=150, temp=0.0)
+    random_agent = RandomAgent()
+    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=0, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    winner = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=200, temp=0.1)
     if winner is None:
         print("Game ended in a draw.")
     elif winner == Player.black:
