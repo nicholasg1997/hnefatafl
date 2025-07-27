@@ -77,6 +77,10 @@ class ZeroAgent(Agent):
         self.dirichlet_epsilon = dirichlet_epsilon
         self.state_cache = {}
 
+        self.device = next(self.model.parameters()).device
+        #print(f"Using device: {self.device}")
+
+
     def set_collector(self, collector):
         self.collector = collector
 
@@ -105,10 +109,10 @@ class ZeroAgent(Agent):
             priors, value = self.state_cache[state_hash]
         else:
             state_tensor = self.encoder.encode(game_state)
-            model_input = np.array([state_tensor])
+            model_input = torch.tensor(np.array([state_tensor]), dtype=torch.float32).to(self.device)
             with torch.no_grad():
                 raw_priors, values = self.model(model_input)
-            priors = softmax(raw_priors[0].detach().numpy())
+            priors = softmax(raw_priors[0].cpu().detach().numpy())
             value = values[0][0]
             self.state_cache[state_hash] = (priors, value)
 
@@ -143,7 +147,7 @@ class ZeroAgent(Agent):
         return new_node
 
     def select_move(self, game_state, temperature=1.0, add_noise=False):
-        self.clear_cache()
+        #self.clear_cache()
         root = self.create_node(game_state)
 
         if add_noise and self.dirichlet_alpha > 0:
@@ -158,10 +162,11 @@ class ZeroAgent(Agent):
             node = root
             path = []
 
-            while True: # work down tree until we hit a leaf node
+            while True: # work down the tree until we hit a leaf node
                 if not node.moves():
                     print("No legal moves available, breaking out of the loop.")
                     break
+
                 move = self.select_branch(node)
 
                 if node.has_child(move):
@@ -169,28 +174,32 @@ class ZeroAgent(Agent):
                     node = node.get_child(move)
                 else:
                     break
+            #print(f"path length: {len(path)}")
 
             parent_node = node
 
             if parent_node.state.is_over():  # we have reached a terminal state
-                current_player = parent_node.state.next_player
+                #print(f"Terminal state reached: {parent_node.state.winner}")
+                current_player = parent_node.state.next_player.other
                 winner = parent_node.state.winner
                 if winner == current_player: # Win
                     value = 1.0
                 elif winner is None:
-                    value = -0.5
+                    value = 0.0
                 else:
                     value = -1.0  # Loss
             else:
                 new_state = parent_node.state.apply_move(move)
-                child_node = self.create_node(new_state, move, parent_node)
+                child_node = self.create_node(new_state, move=move, parent=parent_node)
                 value  = -child_node.value
 
             for path_node, path_move in reversed(path):
-                value = -value
+                #print(f"Recording visit for move {path_move} with value {value}")
                 path_node.record_visit(path_move, value)
+                value = -value
 
-            #print(f"path: {path}")
+            #print(f"path length: {len(path)}")
+            #print(f"tree depth: {len(root.branches)}")
 
         if self.collector is not None:
             visit_counts = np.zeros(self.encoder.num_moves())
@@ -205,6 +214,7 @@ class ZeroAgent(Agent):
             return None
 
         if temperature == 0:
+            #print(f"path length: {len(root.branches)}")
             return max(root.moves(), key=lambda m: root.visit_count(m))
         else:
             moves = root.moves()
@@ -220,44 +230,6 @@ class ZeroAgent(Agent):
 
             move_idx = np.random.choice(len(moves), p=probs)
             return moves[move_idx]
-
-    def expand_leaf_node(self, node, device='mps'):
-        state_hash = hash(str(node.state.board.grid.tobytes()) + str(node.state.next_player))
-        #print(f"state_hash: {state_hash}")
-        if state_hash in self.state_cache:
-            priors, value = self.state_cache[state_hash]
-            #print("Using cached priors and values.")
-            #print(f"priors: {priors}\nvalues: {value}")
-
-        else:
-            #print("Calculating priors and values.")
-            state_tensor = self.encoder.encode(node.state)
-            model_input = torch.from_numpy(np.array([state_tensor])).float().to(device)
-            with torch.no_grad():
-                priors_tensor, values_tensor = self.model(model_input)
-                #print(f"priors: {priors_tensor}\nvalues: {values_tensor}")
-            priors = softmax(priors_tensor[0].detach().cpu().numpy())
-            value = values_tensor[0][0].detach().cpu().numpy()
-            self.state_cache[state_hash] = (priors, value)
-
-        legal_moves = node.state.get_legal_moves()
-        legal_moves_mask = np.zeros_like(priors, dtype=bool)
-        for m in legal_moves:
-            legal_moves_mask[self.encoder.encode_move(m)] = 1
-
-        masked_priors = priors * legal_moves_mask
-        #print(f"masked_priors: {masked_priors}")
-        sum_masked_priors = np.sum(masked_priors)
-        #print(f"sum_masked_priors: {sum_masked_priors}")
-        if sum_masked_priors > 0:
-            masked_priors /= sum_masked_priors
-
-        for move in legal_moves:
-            move_idx = self.encoder.encode_move(move)
-            prior_p = masked_priors[move_idx]
-            node.branches[move] = Branch(prior_p)
-
-        return value
 
     def train(self, experience, batch_size, epochs):
         # TODO: add early stopping, learning rate scheduling, etc.
