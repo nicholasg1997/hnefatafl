@@ -54,8 +54,9 @@ class GameState:
         self.last_move = move
         self.winner = None
 
-        turn_detection = 3 # number of turns back to detect repetition
+        turn_detection = 5 # number of turns back to detect repetition
         self.pawn_history = pawn_history if pawn_history is not None else deque(maxlen=2*turn_detection)
+        self.repeating_player = None
 
         self.history = history if history is not None else Counter()
         current_hash = (self.board.grid.tobytes(), self.next_player)
@@ -99,18 +100,21 @@ class GameState:
 
         if self.previous is not None and len(self.pawn_history) > 0:
             current_pawn_hash = self._get_pawn_positions(self.next_player.other)
-            for pawn_hash, player in self.pawn_history:
-                if player == self.next_player.other and pawn_hash == current_pawn_hash:
-                    #print(f"move repetition detected, game over for player {self.next_player.other}")
-                    self.winner = self.next_player
-                    self.repetition_hit = True
-                    return True
+            repetition_count = sum(1 for pawn_hash, player in self.pawn_history if
+                                   player == self.next_player.other and pawn_hash == current_pawn_hash)
+            if repetition_count >= 2:
+                #print(f"move repetition detected, game over for player {self.next_player.other}")
+                self.winner = None
+                self.repetition_hit = True
+                self.repeating_player = self.next_player.other
+                return True
 
         current_hash = (self.board.grid.tobytes(), self.next_player)
         if self.history[current_hash] >= 3:
             #print(f"repetition detected, game over for player {self.next_player.other}")
-            self.winner = self.next_player
+            self.winner = None
             self.repetition_hit = True
+            self.repeating_player = self.next_player.other
             return True
 
         king_pos = self.find_king()
