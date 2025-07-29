@@ -47,7 +47,8 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent, max_moves=500, verbose=False)
+    game = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
+    winner = game.winner
 
     if winner == Player.black:
         c1.complete_episode(1.0, is_result=True)
@@ -56,8 +57,15 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
         c1.complete_episode(-1.0, is_result=True)
         c2.complete_episode(1.0, is_result=True)
     else:  # Draw
-        c1.complete_episode(-1.0, is_result=False)
-        c2.complete_episode(-1.0, is_result=False)
+        if game.repeating_player == Player.black:
+            c1.complete_episode(-0.4, is_result=False)
+            c2.complete_episode(0.0, is_result=False)
+        elif game.repeating_player == Player.white:
+            c1.complete_episode(0.0, is_result=False)
+            c2.complete_episode(-0.4, is_result=False)
+        else:  # No repetition detected
+            c1.complete_episode(0.0, is_result=False)
+            c2.complete_episode(0.0, is_result=False)
 
     return c1, c2
 
@@ -75,7 +83,7 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
     #print("Loading model from checkpoint...")
     #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
 
-    persistent_buffer = PersistentExperienceBuffer(max_games=150_000)
+    persistent_buffer = PersistentExperienceBuffer(max_games=100_000)
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
@@ -114,5 +122,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=5, mcts_rounds=200, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=5, mcts_rounds=350, batch_size=128,
          learning_rate=0.001, model_save_freq=5)
