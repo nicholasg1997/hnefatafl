@@ -69,7 +69,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
             print(f"Move {move_count}: {game.last_move} took {end_time - time_start:.2f} seconds")
         if move_count > max_moves:
             print("Maximum move limit reached, ending game.")
-            return None
+            return game
     winner = game.winner
     print(f"Game ended in {move_count} moves. Winner: {winner}, duplication detected:{game.repetition_hit}")
     return game
