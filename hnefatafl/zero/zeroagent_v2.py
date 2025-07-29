@@ -280,10 +280,11 @@ class ZeroAgent(Agent):
                 child_node = self.create_node(new_state, move=move, parent=parent_node)
                 value  = -child_node.value
 
+            parent_node.record_visit(move, value)
             for path_node, path_move in reversed(path):
                 #print(f"Recording visit for move {path_move} with value {value}")
-                path_node.record_visit(path_move, value)
                 value = -value
+                path_node.record_visit(path_move, value)
 
             #print(f"path length: {len(path)}")
             #print(f"tree depth: {len(root.branches)}")

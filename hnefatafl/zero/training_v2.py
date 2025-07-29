@@ -58,11 +58,11 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
         c2.complete_episode(1.0, is_result=True)
     else:  # Draw
         if game.repeating_player == Player.black:
-            c1.complete_episode(-0.4, is_result=False)
+            c1.complete_episode(-0.5, is_result=False)
             c2.complete_episode(0.0, is_result=False)
         elif game.repeating_player == Player.white:
             c1.complete_episode(0.0, is_result=False)
-            c2.complete_episode(-0.4, is_result=False)
+            c2.complete_episode(-0.5, is_result=False)
         else:  # No repetition detected
             c1.complete_episode(0.0, is_result=False)
             c2.complete_episode(0.0, is_result=False)
@@ -72,8 +72,18 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
 
 def main(learning_rate=0.001, batch_size=16, num_generations=10,
          num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=10):
+    """
+    Main function to run the self-play training loop for the Hnefatafl Zero agent.
+    :param learning_rate:
+    :param batch_size:
+    :param num_generations:
+    :param num_self_play_games:
+    :param num_training_epochs:
+    :param mcts_rounds:
+    :param model_save_freq:
+    :return:
+    """
     board_size = 11
-
     free_cores = 1  # leave n cores free to keep Mac cool
     num_workers = max(1, os.cpu_count() - free_cores)
     print(f"Using {num_workers} worker processes for self-play.")
