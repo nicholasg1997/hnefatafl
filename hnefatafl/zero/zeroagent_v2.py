@@ -4,8 +4,13 @@ import torch
 
 from hnefatafl.agents.agent import Agent
 
-def softmax(x):
-    """Compute softmax values for each sets of scores in x."""
+def softmax(x)-> np.ndarray:
+    """
+    Compute the softmax of a vector.
+
+    :param x: Input array or vector.
+    :return: The softmax-transformed vector as a NumPy array.
+    """
     e_x = np.exp(x - np.max(x))
     return e_x / e_x.sum(axis=0)
 
@@ -27,16 +32,20 @@ class ZeroTreeNode:
             self.branches[move] = Branch(p)
         self.children = {}
 
-    def moves(self):
+    def moves(self) -> list:
+        """Return a list of legal moves available from this node."""
         return list(self.branches.keys())
 
     def add_child(self, move, child_node):
+        """Add a child node for the given move."""
         self.children[move] = child_node
 
-    def has_child(self, move):
+    def has_child(self, move) -> bool:
+        """Check if a child node exists for the given move."""
         return move in self.children
 
-    def get_child(self, move):
+    def get_child(self, move) -> 'ZeroTreeNode':
+        """Get the child node for the given move."""
         return self.children.get(move, None)
 
     def record_visit(self, move, value):
@@ -66,6 +75,25 @@ class ZeroTreeNode:
 
 
 class ZeroAgent(Agent):
+    """
+    A ZeroAgent class for implementing Monte Carlo Tree Search (MCTS) based decision-making
+    with functions to train and evaluate moves within a game's decision tree.
+
+    This class is designed to represent an intelligent agent that uses a neural network model
+    and MCTS for decision-making in games. The agent utilizes techniques such as priors,
+    state caching, value computation, temperature-based exploration, and Dirichlet noise
+    integration for effective exploration and exploitation during training and gameplay.
+
+    The agent supports setting up an experience collector, clearing the state cache,
+    constructing decision trees, and selecting optimal moves based on MCTS.
+
+    :ivar model: Reference to the neural network model utilized for move priors and value prediction.
+    :ivar encoder: Encoder used for converting game state and moves into tensor representations.
+    :ivar num_rounds: Number of rounds of tree search to perform for each move selection.
+    :ivar c: Exploration constant for balancing exploitation and exploration in tree search.
+    :ivar collector: Experience collector used for collecting gameplay data during training. Initialized as None.
+    :ivar device: Device (e.g., CPU or GPU) where computations are performed.
+    """
     def __init__(self, model, encoder, rounds_per_move=1600, c=3.0, dirichlet_alpha=0.3, dirichlet_epsilon=0.25):
         self.model = model
         self.encoder = encoder
@@ -82,12 +110,35 @@ class ZeroAgent(Agent):
 
 
     def set_collector(self, collector):
+        """
+        Set the experience collector for this agent.
+        :param collector:
+        :return: None
+        """
         self.collector = collector
 
     def clear_cache(self):
+        """
+        Clears the state cache used for storing previously computed priors and values.
+        :return: None
+        """
         self.state_cache = {}
 
     def select_branch(self, node):
+        """
+        Selects the best branch from the available moves based on a scoring function.
+
+        The scoring function combines the expected value of the move (Q), the prior
+        probability (P), and the visit counts, adjusted by the total visits to
+        the node. This function is used to determine the most promising move
+        to explore further in a decision-making or game-playing algorithm.
+
+        If no moves are available, the function will notify the user and return None.
+
+        :param node: The current node for which to select the best move.
+        :return: The move with the highest score among the legal moves available
+            in the current node, or None if no moves are available.
+        """
         total_n = node.total_visit_count
 
         def score_branch(move):
@@ -102,6 +153,23 @@ class ZeroAgent(Agent):
         return max(node.moves(), key=score_branch)
 
     def create_node(self, game_state, move=None, parent=None):
+        """
+        Creates a new node for the tree structure using the game state, move, and parent node.
+
+        This function either retrieves node priors and value from a cache or computes them
+        using an encoder and the model. From the computed or cached priors, a legal
+        move mask is applied and normalized priors for legal moves are determined.
+        The function then creates a new tree node and optionally links it to a parent node.
+
+        :param game_state: The current state of the game as passed to the node creation.
+        :type game_state: GameState
+        :param move: The move that leads to this state. Defaults to None.
+        :type move: Optional[Move]
+        :param parent: The parent node in the tree structure. Defaults to None.
+        :type parent: Optional[ZeroTreeNode]
+        :return: The newly created node with computed priors, value, and game state.
+        :rtype: ZeroTreeNode
+        """
         # --- CACHE ---
         state_hash = hash(str(game_state.board.grid.tobytes()) + str(game_state.next_player))
 
@@ -147,6 +215,22 @@ class ZeroAgent(Agent):
         return new_node
 
     def select_move(self, game_state, temperature=1.0, add_noise=False):
+        """
+        Selects a move for the given game state using a Monte Carlo Tree Search (MCTS) process. This function utilizes
+        MCTS to compute and select the best move based on several rounds of simulation, taking into account
+        factors such as visit counts, value propagation through paths in the tree, and optional Dirichlet noise for
+        introducing exploration. The selected move corresponds to the optimal policy under the current search parameters.
+
+        :param game_state: The current state of the game from which the move is to be selected. It allows access to
+            legal moves, applying a move to generate a new state, and determining if the game has reached a terminal state.
+        :param temperature: A parameter to control exploration versus exploitation during move selection.
+            Temperature of 0 results in greedy deterministic move selection, while higher values increase exploration.
+            Defaults to 1.0 for balanced exploration.
+        :param add_noise: Boolean indicating whether to add Dirichlet noise to the root policy for increased exploration.
+            Defaults to False. This is particularly useful during self-play to diversify learning.
+        :return: The selected move based on the MCTS process. Returns None if there are no legal moves available.
+        :rtype: Optional object corresponding to a valid move in the game's representation.
+        """
         #self.clear_cache()
         root = self.create_node(game_state)
 
@@ -184,10 +268,13 @@ class ZeroAgent(Agent):
                 winner = parent_node.state.winner
                 if winner == current_player: # Win
                     value = 1.0
-                elif winner is None:
-                    value = 0.0
-                else:
-                    value = -1.0  # Loss
+                elif winner == current_player.other:  # Loss
+                    value = -1.0
+                else: # Draw
+                    if parent_node.state.repeating_player == current_player:
+                        value = -0.5
+                    else:
+                        value = 0.0
             else:
                 new_state = parent_node.state.apply_move(move)
                 child_node = self.create_node(new_state, move=move, parent=parent_node)
@@ -232,7 +319,7 @@ class ZeroAgent(Agent):
             return moves[move_idx]
 
     def train(self, experience, batch_size, epochs):
-        # TODO: add early stopping, learning rate scheduling, etc.
+        # TODO: add early stopping, etc.
         dataloader = experience.get_dataloader(batch_size)
         trainer = pl.Trainer(max_epochs=epochs)
         trainer.fit(self.model, dataloader)
