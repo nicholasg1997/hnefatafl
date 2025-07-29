@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import time
 
-from hnefatafl.core.gameState import GameState
+from hnefatafl.core.gamestate_v2 import GameState
 from hnefatafl.core.gameTypes import Player
 
 def clip_probs(probs, max_prob=0.999):
@@ -72,7 +72,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
             return None
     winner = game.winner
     print(f"Game ended in {move_count} moves. Winner: {winner}, duplication detected:{game.repetition_hit}")
-    return winner
+    return game
 
 if __name__ == "__main__":
     from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
@@ -84,16 +84,15 @@ if __name__ == "__main__":
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_1" / "checkpoints" / "epoch=4-step=4635.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_2" / "checkpoints" / "epoch=4-step=5860.ckpt"
 
     encoder = SevenPlaneEncoder(11)
-    model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
-    #model = DualNetwork(encoder)
+    #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    model = DualNetwork(encoder)
     model = model.to("cpu")
     model.eval()
-    random_agent = RandomAgent()
     alpha_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=0, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    winner = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=200, temp=0.1)
+    winner = simulate_game_simple(alpha_agent, RandomAgent(), verbose=True, max_moves=200, temp=0.1)
     if winner is None:
         print("Game ended in a draw.")
     elif winner == Player.black:
