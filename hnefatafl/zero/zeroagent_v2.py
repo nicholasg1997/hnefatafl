@@ -3,6 +3,8 @@ import pytorch_lightning as pl
 import torch
 
 from hnefatafl.agents.agent import Agent
+from hnefatafl.core.gameTypes import Player
+
 
 def softmax(x)-> np.ndarray:
     """
@@ -275,6 +277,16 @@ class ZeroAgent(Agent):
                         value = -0.5
                     else:
                         value = 0.0
+
+            elif (parent_node.state.move_count+1) >= parent_node.state.max_moves:
+                if parent_node.state.next_player == Player.white:
+                    value = -1.0
+                elif parent_node.state.next_player == Player.black:
+                    value = 0.5
+                else:
+                    value = 0.0
+                    print("Error: unknown player")
+                #print(f"max moves reached for player {parent_node.state.next_player}, returning value {value}")
             else:
                 new_state = parent_node.state.apply_move(move)
                 child_node = self.create_node(new_state, move=move, parent=parent_node)
@@ -308,7 +320,7 @@ class ZeroAgent(Agent):
             visit_counts = np.array([root.visit_count(m) for m in moves], dtype=np.float32)
 
             if np.sum(visit_counts) == 0:
-                print("Warning: All visit counts are zero, returning random move.")
+                print(f"Warning: All visit counts are zero, returning random move. move: {parent_node.state.move_count+1}")
                 probs = np.ones_like(visit_counts)/len(visit_counts)
             else:
                 probs = visit_counts ** (1 / temperature)
