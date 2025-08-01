@@ -17,10 +17,10 @@ from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_gam
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
-ckpt_path = project_root / "zero" / "lightning_logs" / "version_10" / "checkpoints" / "epoch=5-step=4950.ckpt"
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_3" / "checkpoints" / "epoch=6-step=3675.ckpt"
 
 
-def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
+def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
     """
     Run a self-play game using the provided model state and encoder.
     Args:
@@ -47,7 +47,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    game = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
+    game = simulate_game(black_agent, white_agent, max_moves=max_moves, verbose=False)
     winner = game.winner
 
     if winner == Player.black:
@@ -56,6 +56,10 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     elif winner == Player.white:
         c1.complete_episode(-1.0, is_result=True)
         c2.complete_episode(1.0, is_result=True)
+    elif game.move_count >= max_moves:
+        print("black wins due to max moves reached.")
+        c1.complete_episode(0.5, is_result=False)
+        c2.complete_episode(-1.0, is_result=False)
     else:  # Draw
         if game.repeating_player == Player.black:
             c1.complete_episode(-0.5, is_result=False)
@@ -71,7 +75,8 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
 
 
 def main(learning_rate=0.001, batch_size=16, num_generations=10,
-         num_self_play_games=2, num_training_epochs=1, mcts_rounds=25, model_save_freq=10):
+         num_self_play_games=2, num_training_epochs=1,
+         mcts_rounds=25, max_moves=200, model_save_freq=10):
     """
     Main function to run the self-play training loop for the Hnefatafl Zero agent.
     :param learning_rate:
@@ -89,23 +94,28 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
     print(f"Using {num_workers} worker processes for self-play.")
 
     encoder = SevenPlaneEncoder(board_size)
-    model = DualNetwork(encoder, learning_rate=learning_rate)
-    #print("Loading model from checkpoint...")
-    #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    #model = DualNetwork(encoder, learning_rate=learning_rate)
+    print("Loading model from checkpoint...")
+    try:
+        model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+        model.cpu()
+        print("Model loaded from checkpoint.")
+    except FileNotFoundError:
+        print(f"Checkpoint {ckpt_path} not found. Initializing new model.")
+        model = DualNetwork(encoder, learning_rate=learning_rate)
 
     persistent_buffer = PersistentExperienceBuffer(max_games=100_000)
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
 
-        #model.cpu()
         model.eval()
         model_state_dict = model.state_dict()
 
         with multiprocessing.Pool(processes=num_workers) as pool:
             with tqdm(total=num_self_play_games, desc="Simulating games") as pbar:
                 results = []
-                for result in pool.imap_unordered(partial(run_self_play_game, model_state_dict, encoder, mcts_rounds),
+                for result in pool.imap_unordered(partial(run_self_play_game, model_state_dict, encoder, mcts_rounds, max_moves),
                                                   range(num_self_play_games)):
                     results.append(result)
                     pbar.update(1)
@@ -132,5 +142,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=5, mcts_rounds=350, batch_size=128,
-         learning_rate=0.001, model_save_freq=5)
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=7, mcts_rounds=400, batch_size=128,
+         learning_rate=0.001, max_moves=200, model_save_freq=5)
