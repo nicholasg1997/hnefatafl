@@ -47,12 +47,14 @@ def _get_legal_moves(grid, my_pawns, board_size, corners, throne):
 
 
 class GameState:
-    def __init__(self, board, next_player, previous, move, history=None, pawn_history=None):
+    def __init__(self, board, next_player, previous, move, history=None, pawn_history=None, move_count=0, max_moves=200):
         self.board = board
         self.next_player = next_player
         self.previous = previous
         self.last_move = move
         self.winner = None
+        self.max_moves = max_moves
+        self.move_count = move_count
 
         turn_detection = 5 # number of turns back to detect repetition
         self.pawn_history = pawn_history if pawn_history is not None else deque(maxlen=2*turn_detection)
@@ -62,10 +64,12 @@ class GameState:
         current_hash = (self.board.grid.tobytes(), self.next_player)
         self.history[current_hash] += 1
         self.repetition_hit = False
+        self.move_limit_hit = False
+
 
     @classmethod
-    def new_game(cls, board_size=11):
-        return cls(Board(board_size), Player.black, previous=None, move=None, history=Counter())
+    def new_game(cls, board_size=11, max_moves=200):
+        return cls(Board(board_size), Player.black, previous=None, move=None, history=Counter(), max_moves=max_moves)
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
@@ -85,8 +89,14 @@ class GameState:
 
         new_board.move_pawn(move)
 
-        next_state = GameState(new_board, self.next_player.other, self,
-                               move, self.history.copy(), self.pawn_history.copy())
+        next_state = GameState(new_board,
+                               self.next_player.other,
+                               self,
+                               move,
+                               self.history.copy(),
+                               self.pawn_history.copy(),
+                               move_count=self.move_count + 1,
+                               max_moves=self.max_moves)
 
         next_state._update_pawn_history()
         next_state._check_for_capture(move, self.next_player)
@@ -96,6 +106,13 @@ class GameState:
 
     def is_over(self):
         if self.winner is not None:
+            return True
+
+        if self.move_count >= self.max_moves:
+            #print(f"Maximum move limit reached, game over for player {self.next_player.other}")
+            self.winner = None
+            self.repeating_player = self.next_player.other
+            self.move_limit_hit = True
             return True
 
         if self.previous is not None and len(self.pawn_history) > 0:

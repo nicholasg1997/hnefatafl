@@ -265,32 +265,32 @@ class ZeroAgent(Agent):
             parent_node = node
 
             if parent_node.state.is_over():  # we have reached a terminal state
-                #print(f"Terminal state reached: {parent_node.state.winner}")
                 current_player = parent_node.state.next_player.other
                 winner = parent_node.state.winner
+
                 if winner == current_player: # Win
                     value = 1.0
                 elif winner == current_player.other:  # Loss
                     value = -1.0
+                elif parent_node.state.move_limit_hit:  # Repetition detected
+                    if current_player == Player.white:
+                        value = -1.0
+                    else:
+                        value = 0.5
+                    #print(f"max moves reached for player {parent_node.state.next_player.other}, returning value {value}")
                 else: # Draw
                     if parent_node.state.repeating_player == current_player:
                         value = -0.5
                     else:
                         value = 0.0
+                #print(f"Move {parent_node.state.move_count}: Terminal state, winner={winner}, move_limit_hit={parent_node.state.move_limit_hit}, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
 
-            elif (parent_node.state.move_count+1) >= parent_node.state.max_moves:
-                if parent_node.state.next_player == Player.white:
-                    value = -1.0
-                elif parent_node.state.next_player == Player.black:
-                    value = 0.5
-                else:
-                    value = 0.0
-                    print("Error: unknown player")
-                #print(f"max moves reached for player {parent_node.state.next_player}, returning value {value}")
             else:
                 new_state = parent_node.state.apply_move(move)
                 child_node = self.create_node(new_state, move=move, parent=parent_node)
+                path.append((parent_node, move))
                 value  = -child_node.value
+                #print(f"Move {parent_node.state.move_count}: Expanded to child, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
 
             for path_node, path_move in reversed(path):
                 #print(f"Recording visit for move {path_move} with value {value}")
