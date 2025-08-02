@@ -11,7 +11,7 @@ KING = 3
 
 
 class SevenPlaneEncoder(Encoder):
-    def __init__(self, board_size, max_moves=200, history_length=7):
+    def __init__(self, board_size, max_moves=200, history_length=8):
         """
         Initialize the encoder with configurable parameters.
 
@@ -379,3 +379,20 @@ class SevenPlaneEncoder(Encoder):
 def create(board_size, max_moves=200, history_length=7):
     """Factory function to create encoder instance"""
     return SevenPlaneEncoder(board_size, max_moves, history_length)
+
+
+if __name__ == "__main__":
+    # Example usage
+    encoder = create(11, max_moves=200, history_length=8)
+    print("Encoder shape:", encoder.get_shape())
+    print("Move space shape:", encoder.move_space_shape())
+    print("Channel info:", encoder.get_channel_info())
+
+    # Create a dummy game state for testing
+    from hnefatafl.core.gameState import GameState
+    game_state = GameState.new_game(board_size=11)
+    game_state = game_state.apply_move(Move.from_encoded(2222, 11))
+
+    encoded = encoder.encode(game_state)
+    print("Encoded shape:", encoded.shape)
+    print("Encoded values:\n", encoded[0])

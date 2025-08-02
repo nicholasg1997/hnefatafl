@@ -41,7 +41,7 @@ def simulate_game(black_player, white_player, board_size=11, max_moves=500, resi
     return winner
 
 def simulate_game_simple(black_player, white_player, board_size=11, max_moves=250, temp = 1.0, verbose=False):
-    game = GameState.new_game(board_size=board_size)
+    game = GameState.new_game(board_size=board_size, max_moves=max_moves)
     agents = {
         Player.black: black_player,
         Player.white: white_player
@@ -67,11 +67,10 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
         end_time = time.time()
         if verbose:
             print(f"Move {move_count}: {game.last_move} took {end_time - time_start:.2f} seconds")
-        if move_count > max_moves:
-            print("Maximum move limit reached, ending game.")
+        if move_count + 1 > max_moves:
+            print("Maximum move limit reached, ending game now.")
             return game
-    winner = game.winner
-    print(f"Game ended in {move_count} moves. Winner: {winner}, duplication detected:{game.repetition_hit}")
+    print(f"Game ended in {move_count} moves. Winner: {game.winner}, duplication detected:{game.repetition_hit}")
     return game
 
 if __name__ == "__main__":
@@ -81,21 +80,31 @@ if __name__ == "__main__":
     from hnefatafl.zero.network import DualNetwork
     from hnefatafl.agents.agent import RandomAgent
 
+    import cProfile
+    import pstats
+
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_2" / "checkpoints" / "epoch=4-step=5860.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=6-step=1904.ckpt"
+    profiler = cProfile.Profile()
 
     encoder = SevenPlaneEncoder(11)
-    #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
-    model = DualNetwork(encoder)
+    model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    #model = DualNetwork(encoder)
     model = model.to("cpu")
     model.eval()
-    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=0, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    winner = simulate_game_simple(alpha_agent, RandomAgent(), verbose=True, max_moves=200, temp=0.1)
+
+    profiler.enable()
+    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=1600, c=0.1, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    end_game = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=10, temp=0.1)
+    winner = end_game.winner
     if winner is None:
         print("Game ended in a draw.")
     elif winner == Player.black:
         print("Black wins!")
     else:
         print("White wins!")
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('tottime')
+    stats.print_stats(20)

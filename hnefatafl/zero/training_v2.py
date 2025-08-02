@@ -7,9 +7,9 @@ import torch
 import numpy as np
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+#from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+from hnefatafl.zero.zeroagent_fast import ZeroAgent
 from hnefatafl.agents.agent import RandomAgent
-#from hnefatafl.zero.zeroagent_fast import ZeroAgent
 from hnefatafl.zero.network import DualNetwork
 from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, PersistentExperienceBuffer, combine_experience
 from hnefatafl.core.gameTypes import Player
@@ -17,7 +17,7 @@ from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_gam
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
-ckpt_path = project_root / "zero" / "lightning_logs" / "version_3" / "checkpoints" / "epoch=6-step=3675.ckpt"
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=6-step=1904.ckpt"
 
 
 def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
@@ -142,5 +142,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=7, mcts_rounds=400, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=7, mcts_rounds=800, batch_size=128,
          learning_rate=0.001, max_moves=200, model_save_freq=5)
