@@ -182,7 +182,7 @@ class ZeroAgent(Agent):
             model_input = torch.tensor(np.array([state_tensor]), dtype=torch.float32).to(self.device)
             with torch.no_grad():
                 raw_priors, values = self.model(model_input)
-            priors = softmax(raw_priors[0].cpu().detach().numpy())
+            priors = softmax(raw_priors[0].detach().numpy())
             value = values[0][0]
             self.state_cache[state_hash] = (priors, value)
 
@@ -272,7 +272,7 @@ class ZeroAgent(Agent):
                     value = 1.0
                 elif winner == current_player.other:  # Loss
                     value = -1.0
-                elif parent_node.state.move_limit_hit:  # Repetition detected
+                elif parent_node.state.move_limit_hit:
                     if current_player == Player.white:
                         value = -1.0
                     else:
