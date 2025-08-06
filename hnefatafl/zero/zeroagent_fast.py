@@ -4,7 +4,6 @@ import torch
 
 from hnefatafl.agents.agent import Agent
 from hnefatafl.core.gameTypes import Player
-from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 
 
 def softmax(x)-> np.ndarray:
@@ -24,7 +23,7 @@ class Branch:
         self.total_value = 0.0
 
 class ZeroTreeNode:
-    def __init__(self, state, value, priors, parent, last_move, encoder=SevenPlaneEncoder):
+    def __init__(self, state, value, priors, parent, last_move, encoder):
         self.state = state
         self.value = value
         self.parent = parent
@@ -39,9 +38,10 @@ class ZeroTreeNode:
         self.visit_counts = np.zeros(len(legal_moves), dtype=int)
         self.total_values = np.zeros(len(legal_moves), dtype=float)
         self.children = [None] * len(legal_moves)
+        self.moves_list = [self.encoder.decode_move_index(idx) for idx in self.legal_move_indices]
 
     def moves(self):
-        return [self.encoder.decode_move_index(idx) for idx in self.legal_move_indices]
+        return self.moves_list
 
     def add_child(self, move, child_node):
         move_idx = self.encoder.encode_move(move)
@@ -221,23 +221,17 @@ class ZeroAgent(Agent):
             parent_node = node
 
             if parent_node.state.is_over():  # we have reached a terminal state
-                current_player = parent_node.state.next_player.other
+                player_at_terminal_node = parent_node.state.next_player.other
                 winner = parent_node.state.winner
 
-                if winner == current_player:  # Win
+
+                if winner is None:
+                    value = 0.0
+                elif winner == player_at_terminal_node:
                     value = 1.0
-                elif winner == current_player.other:  # Loss
+                else:
                     value = -1.0
-                elif parent_node.state.move_limit_hit:
-                    if current_player == Player.white:
-                        value = -1.0
-                    else:
-                        value = 0.5
-                else:  # Draw
-                    if parent_node.state.repeating_player == current_player:
-                        value = -0.5
-                    else:
-                        value = 0.0
+
                 #print(f"Move {parent_node.state.move_count}: Terminal state, winner={winner}, move_limit_hit={parent_node.state.move_limit_hit}, current_player={current_player}, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
 
             else:

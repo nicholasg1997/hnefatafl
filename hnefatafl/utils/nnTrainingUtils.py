@@ -49,7 +49,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
     move_count = 0
     while not game.is_over():
         time_start = time.time()
-        is_exploring = move_count < 30
+        is_exploring = move_count < 50
         temperature = temp if is_exploring else 0.1
         add_noise = is_exploring
 
@@ -75,8 +75,8 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
 
 if __name__ == "__main__":
     from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-    from hnefatafl.zero.zeroagent_v2 import ZeroAgent
-    #from hnefatafl.zero.zeroagent_fast import ZeroAgent
+    #from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+    from hnefatafl.zero.zeroagent_fast import ZeroAgent
     from hnefatafl.zero.network import DualNetwork
     from hnefatafl.agents.agent import RandomAgent
 
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=6-step=1904.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=2-step=2346.ckpt"
     profiler = cProfile.Profile()
 
     encoder = SevenPlaneEncoder(11)
@@ -96,8 +96,8 @@ if __name__ == "__main__":
     model.eval()
 
     profiler.enable()
-    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=1600, c=0.1, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    end_game = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=10, temp=0.1)
+    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=400, c=1.8, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    end_game = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=200, temp=0.0)
     winner = end_game.winner
     if winner is None:
         print("Game ended in a draw.")

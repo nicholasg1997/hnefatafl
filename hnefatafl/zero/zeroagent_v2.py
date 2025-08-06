@@ -265,12 +265,17 @@ class ZeroAgent(Agent):
             parent_node = node
 
             if parent_node.state.is_over():  # we have reached a terminal state
+                print(f"Terminal state reached at move {parent_node.state.move_count}, evaluating outcome.")
                 current_player = parent_node.state.next_player.other
                 winner = parent_node.state.winner
 
                 if winner == current_player: # Win
                     value = 1.0
+                    print(
+                        f"Winning move found for {current_player}: {move}, value=1.0, path={[(n.state.move_count, m) for n, m in path]}")
+                    print(f"board:\n{parent_node.state.board}")
                 elif winner == current_player.other:  # Loss
+                    print(f"Move {parent_node.state.move_count}: Losing move found for {current_player.other}, value=-1.0, path={[(n.state.move_count, m) for n, m in path]}")
                     value = -1.0
                 elif parent_node.state.move_limit_hit:
                     if current_player == Player.white:
