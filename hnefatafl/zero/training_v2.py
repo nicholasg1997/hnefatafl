@@ -5,6 +5,7 @@ from itertools import chain
 from tqdm import tqdm
 import torch
 import numpy as np
+import gc
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 #from hnefatafl.zero.zeroagent_v2 import ZeroAgent
@@ -17,7 +18,7 @@ from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_gam
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
-ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=6-step=1904.ckpt"
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_5" / "checkpoints" / "epoch=2-step=717.ckpt"
 
 
 def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
@@ -51,25 +52,22 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
     winner = game.winner
 
     if winner == Player.black:
+        print("Black wins!")
         c1.complete_episode(1.0, is_result=True)
         c2.complete_episode(-1.0, is_result=True)
     elif winner == Player.white:
+        print("White wins!")
+
         c1.complete_episode(-1.0, is_result=True)
         c2.complete_episode(1.0, is_result=True)
-    elif game.move_count >= max_moves:
-        print("black wins due to max moves reached.")
-        c1.complete_episode(0.5, is_result=False)
-        c2.complete_episode(-1.0, is_result=False)
-    else:  # Draw
-        if game.repeating_player == Player.black:
-            c1.complete_episode(-0.5, is_result=False)
-            c2.complete_episode(0.0, is_result=False)
-        elif game.repeating_player == Player.white:
-            c1.complete_episode(0.0, is_result=False)
-            c2.complete_episode(-0.5, is_result=False)
-        else:  # No repetition detected
-            c1.complete_episode(0.0, is_result=False)
-            c2.complete_episode(0.0, is_result=False)
+    else:
+        print("Draw!")
+        c1.complete_episode(0.0, is_result=False)
+        c2.complete_episode(0.0, is_result=False)
+
+    print(f"Game ended in {game.move_count} moves. Winner: {winner}, duplication detected: {game.repetition_hit}")
+    if game.repetition_hit:
+        print(f"Repetition hit detected, by {game.repeating_player}")
 
     return c1, c2
 
@@ -89,7 +87,7 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
     :return:
     """
     board_size = 11
-    free_cores = 1  # leave n cores free to keep Mac cool
+    free_cores = 2  # leave n cores free to keep Mac cool
     num_workers = max(1, os.cpu_count() - free_cores)
     print(f"Using {num_workers} worker processes for self-play.")
 
@@ -134,7 +132,7 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
             print("Model saved.")
             # TODO: implement model evaluation against a baseline (random/previous agent) and save best agent.
             #  number of games completed, average game length, win rate by color, etc.
-            simulate_game(RandomAgent, training_agent, max_moves=150, verbose=True, temp=0.0)
+            simulate_game(RandomAgent(), training_agent, max_moves=150, verbose=True, temp=0.0)
 
     torch.save(model.state_dict(), 'models/model_final.pth')
     print("Training complete. Final model saved.")
@@ -142,5 +140,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=7, mcts_rounds=800, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=3, mcts_rounds=600, batch_size=128,
          learning_rate=0.001, max_moves=200, model_save_freq=5)

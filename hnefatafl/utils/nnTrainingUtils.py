@@ -50,7 +50,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
     while not game.is_over():
         time_start = time.time()
         is_exploring = move_count < 50
-        temperature = temp if is_exploring else 0.1
+        temperature = temp if is_exploring else 0.5
         add_noise = is_exploring
 
         next_move = agents[game.next_player].select_move(game, temperature=temperature, add_noise=add_noise)
@@ -86,7 +86,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_4" / "checkpoints" / "epoch=2-step=2346.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_7" / "checkpoints" / "epoch=2-step=1293.ckpt"
     profiler = cProfile.Profile()
 
     encoder = SevenPlaneEncoder(11)

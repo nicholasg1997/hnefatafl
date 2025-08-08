@@ -47,7 +47,8 @@ def _get_legal_moves(grid, my_pawns, board_size, corners, throne):
 
 
 class GameState:
-    def __init__(self, board, next_player, previous, move, history=None, pawn_history=None, move_count=0, max_moves=200):
+    def __init__(self, board, next_player, previous, move,
+                 history=None, pawn_history=None, move_count=0, max_moves=200, board_history=None):
         self.board = board
         self.next_player = next_player
         self.previous = previous
@@ -66,10 +67,14 @@ class GameState:
         self.repetition_hit = False
         self.move_limit_hit = False
 
+        history_length = 8
+        self.board_history = board_history if board_history is not None else deque([np.zeros_like(self.board.grid)] * history_length, maxlen=history_length)
+
 
     @classmethod
     def new_game(cls, board_size=11, max_moves=200):
-        return cls(Board(board_size), Player.black, previous=None, move=None, history=Counter(), max_moves=max_moves)
+        return cls(Board(board_size), Player.black, previous=None, move=None,
+                   history=Counter(), max_moves=max_moves, board_history=None)
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
@@ -88,6 +93,8 @@ class GameState:
                 raise ValueError("Invalid move: not a black pawn")
 
         new_board.move_pawn(move)
+        new_board_history = self.board_history.copy()
+        new_board_history.append(self.board.grid)
 
         next_state = GameState(new_board,
                                self.next_player.other,
@@ -96,7 +103,8 @@ class GameState:
                                self.history.copy(),
                                self.pawn_history.copy(),
                                move_count=self.move_count + 1,
-                               max_moves=self.max_moves)
+                               max_moves=self.max_moves,
+                               board_history=new_board_history)
 
         next_state._update_pawn_history()
         next_state._check_for_capture(move, self.next_player)
@@ -106,11 +114,12 @@ class GameState:
 
     def is_over(self):
         if self.winner is not None:
+            #print(f"Terminal state: winner={self.winner}, move_count={self.move_count}, board:\n{self.board}")
             return True
 
         if self.move_count >= self.max_moves:
             #print(f"Maximum move limit reached, game over for player {self.next_player.other}")
-            self.winner = None
+            self.winner = Player.black
             self.repeating_player = self.next_player.other
             self.move_limit_hit = True
             return True
@@ -121,7 +130,7 @@ class GameState:
                                    player == self.next_player.other and pawn_hash == current_pawn_hash)
             if repetition_count >= 2:
                 #print(f"move repetition detected, game over for player {self.next_player.other}")
-                self.winner = None
+                self.winner = self.next_player
                 self.repetition_hit = True
                 self.repeating_player = self.next_player.other
                 return True
@@ -129,13 +138,14 @@ class GameState:
         current_hash = (self.board.grid.tobytes(), self.next_player)
         if self.history[current_hash] >= 3:
             #print(f"repetition detected, game over for player {self.next_player.other}")
-            self.winner = None
+            self.winner = self.next_player
             self.repetition_hit = True
             self.repeating_player = self.next_player.other
             return True
 
         king_pos = self.find_king()
         if self._is_king_captured(king_pos):
+            #print(f"King captured, game over for player White")
             self.winner = Player.black
             return True
 
@@ -148,10 +158,12 @@ class GameState:
 
         if king_pos in corners:
             self.winner = Player.white
+            #print(f"King reached a corner, game over for player {self.next_player.other}. used move {self.last_move}")
             return True
 
         if self._is_fortress():
             self.winner = Player.black
+            #print(f"White is stuck in a fortress, game over for player {self.next_player.other}")
             return True
 
         flattened_board = self.board.grid.flatten()
@@ -241,6 +253,7 @@ class GameState:
 
     def capture(self, point):
         self.board.grid[point.row, point.col] = EMPTY
+        #print(f"Captured pawn at {point}")
 
     def is_hostile(self, point, player):
         # Check if the point is occupied by an opponent's pawn or is a corner point or center point
