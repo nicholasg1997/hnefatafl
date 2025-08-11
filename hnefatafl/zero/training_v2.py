@@ -18,7 +18,7 @@ from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_gam
 from pathlib import Path
 
 project_root = Path(__file__).resolve().parents[1]
-ckpt_path = project_root / "zero" / "lightning_logs" / "version_5" / "checkpoints" / "epoch=2-step=717.ckpt"
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_12" / "checkpoints" / "epoch=2-step=654.ckpt"
 
 
 def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
@@ -32,6 +32,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
     Returns:
         tuple: Two ZeroExperienceCollector instances for black and white agents.
     """
+    step_penalty = 0.001
 
     model = DualNetwork(encoder)
     model.load_state_dict(model_state_dict)
@@ -50,16 +51,16 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
 
     game = simulate_game(black_agent, white_agent, max_moves=max_moves, verbose=False)
     winner = game.winner
+    time_penalty = step_penalty * game.move_count
 
     if winner == Player.black:
         print("Black wins!")
-        c1.complete_episode(1.0, is_result=True)
-        c2.complete_episode(-1.0, is_result=True)
+        c1.complete_episode(1.0 - time_penalty, is_result=True)
+        c2.complete_episode(-1.0 + time_penalty, is_result=True)
     elif winner == Player.white:
-        print("White wins!")
-
-        c1.complete_episode(-1.0, is_result=True)
-        c2.complete_episode(1.0, is_result=True)
+        print("White wins!!")
+        c1.complete_episode(-1.0 + time_penalty, is_result=True)
+        c2.complete_episode(1.0 - time_penalty, is_result=True)
     else:
         print("Draw!")
         c1.complete_episode(0.0, is_result=False)
@@ -105,6 +106,7 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
     persistent_buffer = PersistentExperienceBuffer(max_games=100_000)
 
     for generation in range(num_generations):
+        gc.collect()
         print(f"Starting generation {generation + 1}/{num_generations}")
 
         model.eval()
@@ -140,5 +142,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=3, mcts_rounds=600, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=3, mcts_rounds=700, batch_size=128,
          learning_rate=0.001, max_moves=200, model_save_freq=5)

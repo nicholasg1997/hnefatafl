@@ -101,28 +101,11 @@ class SevenPlaneEncoder(Encoder):
 
     def _get_move_count(self, game_state):
         """Count moves by traversing game history"""
-        count = 0
-        current = game_state
-        while current.previous is not None:
-            count += 1
-            current = current.previous
-        return count
+        return game_state.move_count if game_state else 0
 
     def _get_board_history(self, game_state):
         """Get last N board states"""
-        history = deque(maxlen=self.history_length)
-        current = game_state
-
-        # Collect history (most recent first)
-        while current is not None and len(history) < self.history_length:
-            history.appendleft(current.board.grid)
-            current = current.previous
-
-        # Pad with empty boards if needed
-        while len(history) < self.history_length:
-            history.appendleft(np.zeros(self.board_size, dtype=int))
-
-        return list(history)
+        return list(game_state.board_history)
 
     def encode(self, game_state):
         """
