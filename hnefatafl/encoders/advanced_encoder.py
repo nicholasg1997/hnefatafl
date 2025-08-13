@@ -11,7 +11,7 @@ KING = 3
 
 
 class SevenPlaneEncoder(Encoder):
-    def __init__(self, board_size, max_moves=200, history_length=7):
+    def __init__(self, board_size, max_moves=200, history_length=8):
         """
         Initialize the encoder with configurable parameters.
 
@@ -101,28 +101,11 @@ class SevenPlaneEncoder(Encoder):
 
     def _get_move_count(self, game_state):
         """Count moves by traversing game history"""
-        count = 0
-        current = game_state
-        while current.previous is not None:
-            count += 1
-            current = current.previous
-        return count
+        return game_state.move_count if game_state else 0
 
     def _get_board_history(self, game_state):
         """Get last N board states"""
-        history = deque(maxlen=self.history_length)
-        current = game_state
-
-        # Collect history (most recent first)
-        while current is not None and len(history) < self.history_length:
-            history.appendleft(current.board.grid)
-            current = current.previous
-
-        # Pad with empty boards if needed
-        while len(history) < self.history_length:
-            history.appendleft(np.zeros(self.board_size, dtype=int))
-
-        return list(history)
+        return list(game_state.board_history)
 
     def encode(self, game_state):
         """
@@ -379,3 +362,20 @@ class SevenPlaneEncoder(Encoder):
 def create(board_size, max_moves=200, history_length=7):
     """Factory function to create encoder instance"""
     return SevenPlaneEncoder(board_size, max_moves, history_length)
+
+
+if __name__ == "__main__":
+    # Example usage
+    encoder = create(11, max_moves=200, history_length=8)
+    print("Encoder shape:", encoder.get_shape())
+    print("Move space shape:", encoder.move_space_shape())
+    print("Channel info:", encoder.get_channel_info())
+
+    # Create a dummy game state for testing
+    from hnefatafl.core.gameState import GameState
+    game_state = GameState.new_game(board_size=11)
+    game_state = game_state.apply_move(Move.from_encoded(2222, 11))
+
+    encoded = encoder.encode(game_state)
+    print("Encoded shape:", encoded.shape)
+    print("Encoded values:\n", encoded[0])

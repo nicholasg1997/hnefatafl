@@ -1,10 +1,20 @@
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from sympy.physics.units import temperature
 
 from hnefatafl.agents.agent import Agent
+from hnefatafl.core.gameTypes import Player
 
+
+def softmax(x)-> np.ndarray:
+    """
+    Compute the softmax of a vector.
+
+    :param x: Input array or vector.
+    :return: The softmax-transformed vector as a NumPy array.
+    """
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0)
 
 class Branch:
     def __init__(self, prior):
@@ -12,109 +22,157 @@ class Branch:
         self.visit_count = 0
         self.total_value = 0.0
 
-
 class ZeroTreeNode:
-    def __init__(self, state, value, priors, parent, last_move):
+    def __init__(self, state, value, priors, parent, last_move, encoder):
         self.state = state
         self.value = value
         self.parent = parent
         self.last_move = last_move
         self.total_visit_count = 1
-        self.branches = {}
-        for move, p in priors.items():
-            self.branches[move] = Branch(p)
-        self.children = {}
+        self.encoder = encoder
+
+        legal_moves = state.get_legal_moves()
+        self.legal_move_indices = [self.encoder.encode_move(m) for m in legal_moves]
+        self.move_to_idx = {idx: i for i, idx in enumerate(self.legal_move_indices)}
+        self.priors = np.array([priors[m] for m in legal_moves], dtype=np.float32)
+        self.visit_counts = np.zeros(len(legal_moves), dtype=int)
+        self.total_values = np.zeros(len(legal_moves), dtype=float)
+        self.children = [None] * len(legal_moves)
+        self.moves_list = [self.encoder.decode_move_index(idx) for idx in self.legal_move_indices]
 
     def moves(self):
-        return list(self.branches.keys())
+        return self.moves_list
 
     def add_child(self, move, child_node):
-        self.children[move] = child_node
+        move_idx = self.encoder.encode_move(move)
+        idx = self.move_to_idx[move_idx]
+        self.children[idx] = child_node
 
     def has_child(self, move):
-        return move in self.children
+        move_idx = self.encoder.encode_move(move)
+        return move_idx in self.move_to_idx and self.children[self.move_to_idx[move_idx]] is not None
 
     def get_child(self, move):
-        return self.children.get(move, None)
+        move_idx = self.encoder.encode_move(move)
+        if move_idx not in self.move_to_idx:
+            return None
+        idx = self.move_to_idx[move_idx]
+        return self.children[idx]
 
     def record_visit(self, move, value):
+        move_idx = self.encoder.encode_move(move)
+        idx = self.move_to_idx[move_idx]
         self.total_visit_count += 1
-        self.branches[move].visit_count += 1
-        self.branches[move].total_value += value
-
-    def expected_value(self, move):
-        branch = self.branches.get(move, None)
-        if branch is None or branch.visit_count == 0:
-            return 0.0
-        return branch.total_value / branch.visit_count
-
-    def prior(self, move):
-        branch = self.branches.get(move, None)
-        if branch is None:
-            return 0.0
-        return branch.prior
+        self.visit_counts[idx] += 1
+        self.total_values[idx] += value
 
     def visit_count(self, move):
-        if move in self.branches:
-            return self.branches[move].visit_count
+        move_idx = self.encoder.encode_move(move)
+        if move_idx in self.move_to_idx:
+            idx = self.move_to_idx[move_idx]
+            return self.visit_counts[idx]
         return 0
 
     def is_leaf(self):
-        return len(self.children) == 0
+        return all(child is None for child in self.children)
+
 
 
 class ZeroAgent(Agent):
-    def __init__(self, model, encoder, rounds_per_move=1600, mcts_batch_size=8, c=4.0):
-        assert mcts_batch_size <= rounds_per_move, "MCTS batch size must be less than or equal to rounds per move."
+    """
+    A ZeroAgent class for implementing Monte Carlo Tree Search (MCTS) based decision-making
+    with functions to train and evaluate moves within a game's decision tree.
 
+    This class is designed to represent an intelligent agent that uses a neural network model
+    and MCTS for decision-making in games. The agent utilizes techniques such as priors,
+    state caching, value computation, temperature-based exploration, and Dirichlet noise
+    integration for effective exploration and exploitation during training and gameplay.
+
+    The agent supports setting up an experience collector, clearing the state cache,
+    constructing decision trees, and selecting optimal moves based on MCTS.
+
+    :ivar model: Reference to the neural network model utilized for move priors and value prediction.
+    :ivar encoder: Encoder used for converting game state and moves into tensor representations.
+    :ivar num_rounds: Number of rounds of tree search to perform for each move selection.
+    :ivar c: Exploration constant for balancing exploitation and exploration in tree search.
+    :ivar collector: Experience collector used for collecting gameplay data during training. Initialized as None.
+    :ivar device: Device (e.g., CPU or GPU) where computations are performed.
+    """
+    def __init__(self, model, encoder, rounds_per_move=1600, c=3.0, dirichlet_alpha=0.3, dirichlet_epsilon=0.25):
         self.model = model
         self.encoder = encoder
         self.num_rounds = rounds_per_move
         self.c = c
         self.collector = None
-        self.mcts_batch_size = mcts_batch_size
+
+        self.dirichlet_alpha = dirichlet_alpha
+        self.dirichlet_epsilon = dirichlet_epsilon
+        self.state_cache = {}
+
+        self.device = next(self.model.parameters()).device
+        #print(f"Using device: {self.device}")
+
 
     def set_collector(self, collector):
+        """
+        Set the experience collector for this agent.
+        :param collector:
+        :return: None
+        """
         self.collector = collector
 
+    def clear_cache(self):
+        """
+        Clears the state cache used for storing previously computed priors and values.
+        :return: None
+        """
+        self.state_cache = {}
+
     def select_branch(self, node):
-        total_n = node.total_visit_count
-
-        def score_branch(move):
-            q = node.expected_value(move)
-            p = node.prior(move)
-            n = node.visit_count(move)
-            total_n = node.total_visit_count
-
-            exploration = self.c * p * np.sqrt(total_n) / (1 + n)
-            return q + exploration
-
-        if not node.moves():
+        if not node.legal_move_indices:
+            print("No legal moves available.")
             return None
-        return max(node.moves(), key=score_branch)
+        total_n = node.total_visit_count
+        sqrt_total_n = np.sqrt(total_n)
+
+        # Vectorized Q-value computation with warning suppression
+        with np.errstate(divide='ignore', invalid='ignore'):
+            q_values = np.where(node.visit_counts > 0, node.total_values / node.visit_counts, 0.0)
+
+        # Vectorized UCB score computation
+        scores = q_values + self.c * node.priors * sqrt_total_n / (1 + node.visit_counts)
+
+        # Find the best move using np.argmax
+        best_idx = np.argmax(scores)
+        best_move_idx = node.legal_move_indices[best_idx]
+        return node.encoder.decode_move_index(best_move_idx)
 
     def create_node(self, game_state, move=None, parent=None):
-        state_tensor = self.encoder.encode(game_state)
-        device = next(self.model.parameters()).device
-        model_input = torch.from_numpy(np.array([state_tensor])).float().to(device)
+        state_hash = hash(str(game_state.board.grid.tobytes()) + str(game_state.next_player))
 
-        with torch.no_grad():
-            priors, values = self.model(model_input)
-
-        priors = priors.cpu().numpy()[0]
-        value = values.cpu().numpy()[0][0]
+        if state_hash in self.state_cache:
+            priors, value = self.state_cache[state_hash]
+        else:
+            state_tensor = self.encoder.encode(game_state)
+            model_input = torch.tensor(np.array([state_tensor]), dtype=torch.float32).to(self.device)
+            with torch.no_grad():
+                raw_priors, values = self.model(model_input)
+            #priors = softmax(raw_priors[0].detach().numpy())
+            priors = torch.softmax(raw_priors[0], dim=0).detach().cpu().numpy()
+            value = values[0][0]
+            self.state_cache[state_hash] = (priors, value)
 
         legal_moves = game_state.get_legal_moves()
         legal_moves_mask = np.zeros_like(priors, dtype=bool)
         for m in legal_moves:
-            legal_moves_mask[self.encoder.encode_move(m)] = True
+            legal_moves_mask[self.encoder.encode_move(m)] = 1
 
         masked_priors = priors * legal_moves_mask
-        sum_masked_priors = np.sum(masked_priors)
-        if sum_masked_priors > 0:
-            masked_priors /= sum_masked_priors
+
+        if np.sum(masked_priors) > 0:
+            masked_priors /= np.sum(masked_priors)
         else:
-            masked_priors = legal_moves_mask / np.sum(legal_moves_mask)
+            masked_priors[legal_moves_mask] = 1.0 / np.sum(legal_moves_mask)
 
         move_priors = {
             self.encoder.decode_move_index(idx): p
@@ -122,113 +180,100 @@ class ZeroAgent(Agent):
             if legal_moves_mask[idx]
         }
 
-        new_node = ZeroTreeNode(game_state, value, move_priors, parent, move)
+        new_node = ZeroTreeNode(
+            game_state,
+            value,
+            move_priors,
+            parent,
+            move,
+            self.encoder
+        )
         if parent is not None:
             parent.add_child(move, new_node)
         return new_node
 
-    def select_move(self, game_state, temp=1.0):
+    def select_move(self, game_state, temperature=1.0, add_noise=False):
+        # self.clear_cache()
         root = self.create_node(game_state)
 
-        num_loops = max(1, self.num_rounds // self.mcts_batch_size)
-        for _ in range(num_loops):
-            batch_leaves = []
-            for _ in range(self.mcts_batch_size):
-                node = root
-                next_move = self.select_branch(node)
-                while next_move is not None and node.has_child(next_move):
-                    node = node.get_child(next_move)
-                    next_move = self.select_branch(node)
-                batch_leaves.append((node, next_move))
+        if add_noise and self.dirichlet_alpha > 0:
+            if root.legal_move_indices:
+                noise = np.random.dirichlet([self.dirichlet_alpha] * len(root.legal_move_indices))
+                root.priors = (1 - self.dirichlet_epsilon) * root.priors + self.dirichlet_epsilon * noise
 
-            game_states = [leaf.state.apply_move(move) for leaf, move in batch_leaves if move is not None]
-            if not game_states:
-                continue
+        for _ in range(self.num_rounds):
+            node = root
+            path = []
 
-            state_tensors = [self.encoder.encode(gs) for gs in game_states]
-            device = next(self.model.parameters()).device
-            model_input = torch.from_numpy(np.array(state_tensors)).float().to(device)
+            while True:  # work down the tree until we hit a leaf node
+                if not node.moves():
+                    print("No legal moves available, breaking out of the loop.")
+                    break
 
-            with torch.no_grad():
-                priors_batch, values_batch = self.model(model_input)
+                move = self.select_branch(node)
 
-            priors_batch = priors_batch.cpu().numpy()
-            values_batch = values_batch.cpu().numpy()
-
-            leaf_idx = 0
-            for (parent_node, move), new_game_state in zip(batch_leaves, game_states):
-                if move is None:
-                    continue
-
-                priors, value_estimate = priors_batch[leaf_idx], values_batch[leaf_idx][0]
-                leaf_idx += 1
-
-                if new_game_state.is_over():
-                    if new_game_state.winner == new_game_state.next_player.other:
-                        value = 1.0
-                    elif new_game_state.winner is None:
-                        value = 0.0
-                    else:
-                        value = -1.0
+                if node.has_child(move):
+                    path.append((node, move))
+                    node = node.get_child(move)
                 else:
-                    value = value_estimate
+                    break
 
-                legal_moves = new_game_state.get_legal_moves()
-                legal_moves_mask = np.zeros_like(priors, dtype=bool)
-                for m in legal_moves:
-                    legal_moves_mask[self.encoder.encode_move(m)] = True
+            parent_node = node
 
-                masked_priors = priors * legal_moves_mask
-                sum_masked_priors = np.sum(masked_priors)
-                if sum_masked_priors > 0:
-                    masked_priors /= sum_masked_priors
+            if parent_node.state.is_over():  # we have reached a terminal state
+                player_at_terminal_node = parent_node.state.next_player.other
+                winner = parent_node.state.winner
+
+
+                if winner is None:
+                    value = 0.0
+                elif winner == player_at_terminal_node:
+                    value = 1.0
                 else:
-                    if np.sum(legal_moves_mask) > 0:
-                        masked_priors = legal_moves_mask / np.sum(legal_moves_mask)
+                    value = -1.0
 
-                move_priors = {
-                    self.encoder.decode_move_index(idx): p
-                    for idx, p in enumerate(masked_priors) if legal_moves_mask[idx]
-                }
+                #print(f"Move {parent_node.state.move_count}: Terminal state, winner={winner}, move_limit_hit={parent_node.state.move_limit_hit}, current_player={current_player}, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
 
-                child_node = ZeroTreeNode(new_game_state, value, move_priors, parent_node, move)
-                parent_node.add_child(move, child_node)
+            else:
+                new_state = parent_node.state.apply_move(move)
+                child_node = self.create_node(new_state, move=move, parent=parent_node)
+                path.append((parent_node, move))
+                value = -child_node.value
+                #print(f"Move {parent_node.state.move_count}: Expanded to child, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
 
-                bp_value = -child_node.value
-                temp_node = parent_node
-                bp_move = move
-                while temp_node is not None:
-                    temp_node.record_visit(bp_move, bp_value)
-                    bp_move = temp_node.last_move
-                    temp_node = temp_node.parent
-                    bp_value = -bp_value
-
-
-        if not root.moves():
-            return None
-
-
-        if temp > 0:
-            visit_counts = np.array([root.visit_count(m) for m in root.moves()])
-            probs = visit_counts ** (1 / temp)
-            probs /= np.sum(probs)
-            move_idx = np.random.choice(len(root.moves()), p=probs)
-            print(len(root.moves()))
-            selected_move = list(root.moves())[move_idx]
-        else:
-            selected_move = max(root.moves(), key=lambda m: root.visit_count(m))
+            for path_node, path_move in reversed(path):
+                path_node.record_visit(path_move, value)
+                value = -value
 
         if self.collector is not None:
-            visit_counts = np.zeros(self.encoder.num_moves())
-            for move, branch in root.branches.items():
-                move_idx = self.encoder.encode_move(move)
-                visit_counts[move_idx] = branch.visit_count
+            visit_counts = np.zeros(self.encoder.num_moves(), dtype=np.float32)
+            for idx, count in zip(root.legal_move_indices, root.visit_counts):
+                visit_counts[idx] = count
             encoded_state = self.encoder.encode(game_state)
             self.collector.record_decision(encoded_state, visit_counts)
 
-        return selected_move
+        if not root.moves():
+            print("No legal moves available, returning None.")
+            return None
+
+        if temperature == 0:
+            return max(root.moves(), key=lambda m: root.visit_count(m))
+        else:
+            moves = root.moves()
+            visit_counts = np.array([root.visit_count(m) for m in moves], dtype=np.float32)
+
+            if np.sum(visit_counts) == 0:
+                print(
+                    f"Warning: All visit counts are zero, returning random move. move: {parent_node.state.move_count + 1}")
+                probs = np.ones_like(visit_counts) / len(visit_counts)
+            else:
+                probs = visit_counts ** (1 / temperature)
+                probs /= np.sum(probs)
+            move_idx = np.random.choice(len(moves), p=probs)
+            return moves[move_idx]
 
     def train(self, experience, batch_size, epochs):
+        # TODO: add early stopping, etc.
         dataloader = experience.get_dataloader(batch_size)
-        trainer = pl.Trainer(max_epochs=epochs, accelerator="auto")
+        trainer = pl.Trainer(max_epochs=epochs)
         trainer.fit(self.model, dataloader)

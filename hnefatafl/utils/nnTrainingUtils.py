@@ -1,8 +1,8 @@
 import torch
 import numpy as np
+import time
 
-from hnefatafl.agents.agent import RandomAgent
-from hnefatafl.core.gameState import GameState
+from hnefatafl.core.gamestate_v2 import GameState
 from hnefatafl.core.gameTypes import Player
 
 def clip_probs(probs, max_prob=0.999):
@@ -41,15 +41,16 @@ def simulate_game(black_player, white_player, board_size=11, max_moves=500, resi
     return winner
 
 def simulate_game_simple(black_player, white_player, board_size=11, max_moves=250, temp = 1.0, verbose=False):
-    game = GameState.new_game(board_size=board_size)
+    game = GameState.new_game(board_size=board_size, max_moves=max_moves)
     agents = {
         Player.black: black_player,
         Player.white: white_player
     }
     move_count = 0
     while not game.is_over():
-        is_exploring = move_count < 30
-        temperature = temp if is_exploring else 0.0
+        time_start = time.time()
+        is_exploring = move_count < 50
+        temperature = temp if is_exploring else min(0.5, temp)
         add_noise = is_exploring
 
         next_move = agents[game.next_player].select_move(game, temperature=temperature, add_noise=add_noise)
@@ -60,32 +61,50 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
 
         game = game.apply_move(next_move)
         if verbose:
-            print(f"Move {move_count + 1}: {game.last_move}")
+            print(f"Move {move_count + 1}: {game.last_move} by {game.next_player.other}")
             print(game.board)
         move_count += 1
-        if move_count > max_moves:
-            print("Maximum move limit reached, ending game.")
-            return None
-    winner = game.winner
-    print(f"Game ended in {move_count} moves. Winner: {winner}")
-    return winner
+        end_time = time.time()
+        if verbose:
+            print(f"Move {move_count}: {game.last_move} took {end_time - time_start:.2f} seconds")
+        if move_count + 1 > max_moves:
+            print("Maximum move limit reached, ending game now.")
+            return game
+    print(f"Game ended in {move_count} moves. Winner: {game.winner}, duplication detected:{game.repetition_hit}")
+    return game
 
 if __name__ == "__main__":
     from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
-    from hnefatafl.zero.zeroagent import ZeroAgent
+    #from hnefatafl.zero.zeroagent_v2 import ZeroAgent
+    from hnefatafl.zero.zeroagent_fast import ZeroAgent
     from hnefatafl.zero.network import DualNetwork
     from hnefatafl.agents.agent import RandomAgent
 
+    import cProfile
+    import pstats
+
+    from pathlib import Path
+
+    project_root = Path(__file__).resolve().parents[1]
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_12" / "checkpoints" / "epoch=2-step=654.ckpt"
+    profiler = cProfile.Profile()
+
     encoder = SevenPlaneEncoder(11)
-    model = DualNetwork.load_from_checkpoint("/Users/nickgault/PycharmProjects/hnefatafl/hnefatafl/zero/lightning_logs/version_5/checkpoints/epoch=9-step=2740.ckpt", encoder=encoder)
-    model = model.to("mps")
+    model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    #model = DualNetwork(encoder)
+    model = model.to("cpu")
     model.eval()
-    black_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    white_agent = ZeroAgent(model, encoder, rounds_per_move=200, c=np.sqrt(2), dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
-    winner = simulate_game_simple(RandomAgent(), white_agent, verbose=True, max_moves=150, temp=0.0)
+
+    profiler.enable()
+    alpha_agent = ZeroAgent(model, encoder, rounds_per_move=400, c=1.8, dirichlet_alpha=0.0, dirichlet_epsilon=0.0)
+    end_game = simulate_game_simple(alpha_agent, alpha_agent, verbose=True, max_moves=200, temp=0.0)
+    winner = end_game.winner
     if winner is None:
         print("Game ended in a draw.")
     elif winner == Player.black:
         print("Black wins!")
     else:
         print("White wins!")
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats('tottime')
+    stats.print_stats(20)

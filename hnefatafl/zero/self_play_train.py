@@ -4,6 +4,7 @@ from functools import partial
 from itertools import chain
 from tqdm import tqdm
 import torch
+import numpy as np
 
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 from hnefatafl.zero.zeroagent_v2 import ZeroAgent
@@ -19,14 +20,15 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
         model_state_dict (dict): The state dictionary of the model to be used.
         encoder (SevenPlaneEncoder): The encoder for the game state.
         mcts_rounds (int): Number of MCTS rounds to perform per move.
+        _: Placeholder for unused argument (for compatibility with multiprocessing).
     Returns:
         tuple: Two ZeroExperienceCollector instances for black and white agents.
     """
     model = DualNetwork(encoder)
     model.load_state_dict(model_state_dict)
 
-    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=4)
-    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=4)
+    black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
+    white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
 
     c1 = ZeroExperienceCollector()
     c2 = ZeroExperienceCollector()
@@ -36,7 +38,7 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, _):
     c1.begin_episode()
     c2.begin_episode()
 
-    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=True)
+    winner = simulate_game(black_agent, white_agent, max_moves=200, verbose=False)
 
     if winner == Player.black:
         c1.complete_episode(1.0)
@@ -62,12 +64,14 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
     mcts_rounds = mcts_rounds
     model_save_freq = model_save_freq
 
-    free_cores = 9
-    num_workers = max(1, os.cpu_count() - free_cores) # leave n cores free to keep Mac cool
+    free_cores = 2 # leave n cores free to keep Mac cool
+    num_workers = max(1, os.cpu_count() - free_cores)
     print(f"Using {num_workers} worker processes for self-play.")
 
     encoder = SevenPlaneEncoder(board_size)
     model = DualNetwork(encoder, learning_rate=learning_rate)
+
+    
 
     for generation in range(num_generations):
         print(f"Starting generation {generation + 1}/{num_generations}")
@@ -107,5 +111,5 @@ def main(learning_rate=0.01, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=12, mcts_rounds=300, batch_size=128,
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=6, mcts_rounds=600, batch_size=128,
          learning_rate=1e-4)

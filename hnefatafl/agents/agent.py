@@ -49,7 +49,7 @@ def point_from_coord(coord):
     :return: A Point object corresponding to the coordinate.
     """
     col = ord(coord[0].upper()) - ord('A')
-    row = int(coord[1]) - 1
+    row = int(coord[1:]) - 1
     return Point(col, row)
 
 

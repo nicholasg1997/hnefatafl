@@ -47,22 +47,34 @@ def _get_legal_moves(grid, my_pawns, board_size, corners, throne):
 
 
 class GameState:
-    def __init__(self, board, next_player, previous, move, history=None):
+    def __init__(self, board, next_player, previous, move,
+                 history=None, pawn_history=None, move_count=0, max_moves=200, board_history=None):
         self.board = board
         self.next_player = next_player
         self.previous = previous
         self.last_move = move
         self.winner = None
+        self.max_moves = max_moves
+        self.move_count = move_count
+
+        turn_detection = 5 # number of turns back to detect repetition
+        self.pawn_history = pawn_history if pawn_history is not None else deque(maxlen=2*turn_detection)
+        self.repeating_player = None
 
         self.history = history if history is not None else Counter()
         current_hash = (self.board.grid.tobytes(), self.next_player)
         self.history[current_hash] += 1
         self.repetition_hit = False
+        self.move_limit_hit = False
+
+        history_length = 8
+        self.board_history = board_history if board_history is not None else deque([np.zeros_like(self.board.grid)] * history_length, maxlen=history_length)
 
 
     @classmethod
-    def new_game(cls, board_size=11):
-        return cls(Board(board_size), Player.black, previous=None, move=None, history=Counter())
+    def new_game(cls, board_size=11, max_moves=200):
+        return cls(Board(board_size), Player.black, previous=None, move=None,
+                   history=Counter(), max_moves=max_moves, board_history=None)
 
     def apply_move(self, move):
         new_board = Board(self.board.size)
@@ -81,25 +93,59 @@ class GameState:
                 raise ValueError("Invalid move: not a black pawn")
 
         new_board.move_pawn(move)
+        new_board_history = self.board_history.copy()
+        new_board_history.append(self.board.grid)
 
-        next_state = GameState(new_board, self.next_player.other, self, move, self.history.copy())
+        next_state = GameState(new_board,
+                               self.next_player.other,
+                               self,
+                               move,
+                               self.history.copy(),
+                               self.pawn_history.copy(),
+                               move_count=self.move_count + 1,
+                               max_moves=self.max_moves,
+                               board_history=new_board_history)
+
+        next_state._update_pawn_history()
         next_state._check_for_capture(move, self.next_player)
         next_state.is_over()
+
         return next_state
 
     def is_over(self):
         if self.winner is not None:
+            #print(f"Terminal state: winner={self.winner}, move_count={self.move_count}, board:\n{self.board}")
             return True
+
+        if self.move_count >= self.max_moves:
+            #print(f"Maximum move limit reached, game over for player {self.next_player.other}")
+            self.winner = Player.black
+            self.repeating_player = self.next_player.other
+            self.move_limit_hit = True
+            return True
+
+        if self.previous is not None and len(self.pawn_history) > 0:
+            current_pawn_hash = self._get_pawn_positions(self.next_player.other)
+            repetition_count = sum(1 for pawn_hash, player in self.pawn_history if
+                                   player == self.next_player.other and pawn_hash == current_pawn_hash)
+            if repetition_count >= 2:
+                #print(f"move repetition detected, game over for player {self.next_player.other}")
+                self.winner = self.next_player
+                self.repetition_hit = True
+                self.repeating_player = self.next_player.other
+                return True
 
         current_hash = (self.board.grid.tobytes(), self.next_player)
         if self.history[current_hash] >= 3:
             #print(f"repetition detected, game over for player {self.next_player.other}")
             self.winner = self.next_player
             self.repetition_hit = True
+            self.repeating_player = self.next_player.other
             return True
 
         king_pos = self.find_king()
         if self._is_king_captured(king_pos):
+            #print(f"King captured, game over for player White")
             self.winner = Player.black
             return True
 
@@ -112,10 +158,12 @@ class GameState:
 
         if king_pos in corners:
             self.winner = Player.white
+            #print(f"King reached a corner, game over for player {self.next_player.other}. used move {self.last_move}")
             return True
 
         if self._is_fortress():
             self.winner = Player.black
+            #print(f"White is stuck in a fortress, game over for player {self.next_player.other}")
             return True
 
         flattened_board = self.board.grid.flatten()
@@ -132,6 +180,27 @@ class GameState:
             return True
 
         return False
+
+    def _get_pawn_positions(self, player):
+        grid = self.board.grid
+        empty_grid = np.zeros_like(grid)
+        player_pawns = [WHITE_PAWN, KING] if player == Player.white else [BLACK_PAWN,]
+        for row in range(grid.shape[0]):
+            for col in range(grid.shape[1]):
+                if grid[row, col] in player_pawns:
+                    empty_grid[row, col] = 1
+
+        #print(f"Calculating pawn positions for player {player}, grid:\n{empty_grid}")
+        return hash(empty_grid.tobytes())
+
+    def _update_pawn_history(self):
+        """
+        Update the pawn history with the current state of the board for the next player.
+        This is used to detect repetitions in pawn positions.
+        """
+        if self.previous is not None:
+            current_pawn_hash = self._get_pawn_positions(self.next_player)
+            self.pawn_history.append((current_pawn_hash, self.next_player))
 
     def get_legal_moves(self):
         """
@@ -184,6 +253,7 @@ class GameState:
 
     def capture(self, point):
         self.board.grid[point.row, point.col] = EMPTY
+        #print(f"Captured pawn at {point}")
 
     def is_hostile(self, point, player):
         # Check if the point is occupied by an opponent's pawn or is a corner point or center point
