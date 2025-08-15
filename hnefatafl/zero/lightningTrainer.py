@@ -19,7 +19,6 @@ from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, Persi
     ReplayBufferCheckpoint
 from hnefatafl.zero.lightning_network import DualNetwork
 from hnefatafl.zero.zeroagent_fast import ZeroAgent
-from hnefatafl.zero.arena_evaluation import ArenaConfig, Arena
 
 def _run_self_play_game_worker(model_state_dict, encoder, mcts_rounds, max_moves, _):
     step_penalty = 0.001
