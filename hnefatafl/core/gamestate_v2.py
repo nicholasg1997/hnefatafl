@@ -129,7 +129,7 @@ class GameState:
             repetition_count = sum(1 for pawn_hash, player in self.pawn_history if
                                    player == self.next_player.other and pawn_hash == current_pawn_hash)
             if repetition_count >= 2:
-                #print(f"move repetition detected, game over for player {self.next_player.other}")
+                #print(f"repetition detected for player {self.next_player.other} by playing move {self.last_move}")
                 self.winner = self.next_player
                 self.repetition_hit = True
                 self.repeating_player = self.next_player.other

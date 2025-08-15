@@ -1,6 +1,7 @@
 import numpy as np
 from collections import deque
 import torch
+from pytorch_lightning.callbacks import Callback
 from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 
 class ZeroExperienceCollector:
@@ -93,6 +94,52 @@ class PersistentExperienceBuffer:
             rewards=np.array(self.rewards),
             is_result=np.array(self.is_result)
         )
+
+    def clear_states(self):
+        self.states.clear()
+        self.visit_counts.clear()
+        self.rewards.clear()
+        self.is_result.clear()
+
+    def get_states(self):
+        return {
+            'states': np.array(self.states),
+            'visit_counts': np.array(self.visit_counts),
+            'rewards': np.array(self.rewards),
+            'is_result': np.array(self.is_result)
+        }
+
+    def set_states(self, load_states):
+        self.clear_states()
+
+        self.states.extend(load_states['states'])
+        self.visit_counts.extend(load_states['visit_counts'])
+        self.rewards.extend(load_states['rewards'])
+        self.is_result.extend(load_states['is_result'])
+
+    def __len__(self):
+        return len(self.states)
+
+
+class ReplayBufferCheckpoint(Callback):
+    def __init__(self, buffer: PersistentExperienceBuffer):
+        super().__init__()
+        self.buffer = buffer
+        self.buffer_key = 'experience'
+
+    def on_save_checkpoint(self, trainer, pl_module, checkpoint):
+        print('Saving experience buffer...')
+        checkpoint[self.buffer_key] = self.buffer.get_states()
+        print("Experience buffer saved.")
+
+    def on_load_checkpoint(self, trainer, pl_module, checkpoint):
+        print('Loading experience buffer...')
+        buffer_states = checkpoint.get(self.buffer_key, None)
+        if buffer_states:
+            self.buffer.set_states(buffer_states)
+            print("Experience buffer loaded.")
+        else:
+            print("No experience buffer found in checkpoint, starting with an empty buffer.")
 
 
 def combine_experience(collectors):
