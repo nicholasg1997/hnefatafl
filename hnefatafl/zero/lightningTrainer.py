@@ -14,13 +14,14 @@ from tqdm import tqdm
 from hnefatafl.core.gameTypes import Player
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_game
+from hnefatafl.utils.nnTrainingUtils import ProgressiveMCTSConfigs
 from hnefatafl.utils.statTracker import StatTracker
 from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, PersistentExperienceBuffer, \
     ReplayBufferCheckpoint
 from hnefatafl.zero.lightning_network import DualNetwork
 from hnefatafl.zero.zeroagent_fast import ZeroAgent
 
-def _run_self_play_game_worker(model_state_dict, encoder, mcts_rounds, max_moves, _):
+def _run_self_play_game_worker(model_state_dict, encoder, sampler, current_gen, max_moves, _):
     step_penalty = 0.001
 
     temp_model = DualNetwork(encoder)
@@ -28,6 +29,9 @@ def _run_self_play_game_worker(model_state_dict, encoder, mcts_rounds, max_moves
     temp_model.to('cpu')
     temp_model.eval()
     torch.set_grad_enabled(False)
+
+    mcts_rounds = sampler.sample(current_gen)
+    print(f"MCTS rounds: {mcts_rounds}")
 
     black_agent = ZeroAgent(temp_model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
     white_agent = ZeroAgent(temp_model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
@@ -40,7 +44,7 @@ def _run_self_play_game_worker(model_state_dict, encoder, mcts_rounds, max_moves
     c1.begin_episode()
     c2.begin_episode()
 
-    game = simulate_game(black_agent, white_agent, max_moves=max_moves, verbose=False)
+    game = simulate_game(black_agent, white_agent, max_moves=max_moves, verbose=False, board_size=11)
     winner = game.winner
     time_penalty = step_penalty * game.move_count
 
@@ -63,11 +67,9 @@ def _run_self_play_game_worker(model_state_dict, encoder, mcts_rounds, max_moves
     }
     return c1, c2, game_stats
 
-
+#TODO: convert all the parameters to a config object
 def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
-         mcts_rounds=300, batch_size=128, learning_rate=0.0001, max_moves=500, model_save_freq=1):
-
-
+         batch_size=128, learning_rate=0.0001, max_moves=500):
     project_root = Path(__file__).resolve().parents[1]
     checkpoints_dir = project_root / "model" / "checkpoints"
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
@@ -79,27 +81,34 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
 
     start_generation = 0
     wandb_run_id = None
-    latest_ckpt_path = checkpoints_dir / "last.ckpt"
+    latest_ckpt_path = checkpoints_dir / "last-v4.ckpt"
 
     if latest_ckpt_path.exists():
         print(f"Found checkpoint. Resuming training from: {latest_ckpt_path}")
         full_ckpt = torch.load(latest_ckpt_path, weights_only=False)
+        current_model.load_state_dict(full_ckpt['state_dict'])
+
         replay_callback = ReplayBufferCheckpoint(persistent_buffer)
         replay_callback.on_load_checkpoint(None, None, full_ckpt)
 
         start_generation = full_ckpt.get('current_generation', 0)
         wandb_run_id = full_ckpt.get('wandb_run_id')
-        print(f"Resuming from generation {start_generation}")
+        print(f"Resuming from generation {start_generation} with run ID {wandb_run_id}")
     else:
         print("No checkpoint found. Starting new training run.")
         latest_ckpt_path = None
 
-    wandb_logger = WandbLogger(project="hnefatafl-zero", id=wandb_run_id, resume="allow")
+    mcts_config = ProgressiveMCTSConfigs(
+        depths=[200, 400, 800, 1200],
+        initial_probs=[0.5, 0.4, 0.1, 0.0],
+        final_probs=[0.1, 0.3, 0.55, 0.05],
+        total_gens=num_generations
+    )
 
     for generation in range(start_generation, num_generations):
         gc.collect()
         print(f"\n===== STARTING GENERATION {generation + 1}/{num_generations} =====")
-        print(f"Current buffer size: {len(persistent_buffer.states)}")
+        print(f"Current buffer size: {len(persistent_buffer)}")
 
         print("--- Generating self-play games... ---")
         current_generation = generation + 1
@@ -111,9 +120,12 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
 
         with multiprocessing.get_context("spawn").Pool(processes=num_workers) as pool:
             with tqdm(total=num_self_play_games, desc=f"Gen {current_generation} Games") as pbar:
-                worker_func = partial(_run_self_play_game_worker, model_state_dict, encoder, mcts_rounds, max_moves)
-
-                # FIX: Iterate over the results as they complete to update the progress bar in real-time.
+                worker_func = partial(_run_self_play_game_worker,
+                                      model_state_dict,
+                                      encoder,
+                                      mcts_config,
+                                      generation,
+                                      max_moves)
                 all_results = []
                 for result in pool.imap_unordered(worker_func, range(num_self_play_games)):
                     all_results.append(result)
@@ -126,7 +138,7 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
         for stats in game_stats_list:
             stat_tracker.log_game(stats)
 
-        print(f"Buffer size: {len(persistent_buffer.states)}")
+        print(f"Buffer size: {len(persistent_buffer)}")
 
         print("--- Training on new data... ---")
         current_model.train()
@@ -141,10 +153,14 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
 
         current_model.current_generation = current_generation
 
+        wandb_logger = WandbLogger(project="hnefatafl-zero", id=wandb_run_id, resume="allow")
+        wandb_run_id = wandb_logger.experiment.id
+
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
             dirpath=checkpoints_dir,
             filename=f"model-gen_{current_generation}" + "-{epoch:02d}",
-            save_last=True
+            save_last=True,
+            save_top_k=0,
         )
 
         trainer = pl.Trainer(
@@ -155,13 +171,9 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
             log_every_n_steps=10
         )
 
-        trainer.fit(current_model, train_dataloaders=train_loader,
-                    ckpt_path=str(latest_ckpt_path) if latest_ckpt_path else None)
-
-        latest_ckpt_path = None
+        trainer.fit(current_model, train_dataloaders=train_loader)
 
         stat_tracker.summarize_generation(current_generation)
-
 
     print("Training complete.")
     stat_tracker.close()
@@ -170,4 +182,4 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
     main(num_generations=20, num_self_play_games=200, num_training_epochs=5,
-         mcts_rounds=300, batch_size=128, learning_rate=0.0001, max_moves=400, model_save_freq=1)
+         batch_size=128, learning_rate=0.0001, max_moves=400)
