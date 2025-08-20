@@ -50,6 +50,30 @@ fortress_board = [ # for testing fortress detection
     [0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0],
 ]
 
+def convert_string_to_board(board_string):
+    piece_map = {'.': 0, 'B': 1, 'K': 3, 'W': 2}
+    board_lines = board_string.strip().split('\n')
+    board = []
+    for line in board_lines:
+        row = [piece_map[char] for char in line.split()]
+        board.append(row)
+    return board
+
+converted_board = """. B B B B . . B . . .
+. B B K B . . . . . .
+. . . . . . . . . . B
+. . . B . . . . . . .
+. . . . . . . . . . B
+. . . . . . . B . . .
+. . . . . . . . . . .
+. . . . . . . . . B .
+. . . . . . . . . B B
+. B B . . . . B . . B
+. . . . B . B . B . .
+"""
+
+string_board = convert_string_to_board(converted_board)
+
 
 BOARD_CONFIGS = defaultdict(dict)
 
@@ -66,4 +90,6 @@ BOARD_CONFIGS[11] = {"board": board_11, "size": 11,
 
 BOARD_CONFIGS[11.1] = {"board": fortress_board, "size": 11,
                      "num_attackers": 24, "num_defenders":12 , "name": "Fortress test Board"}
+
+BOARD_CONFIGS[11.2] = {"board": string_board, "size": 11, 'name': "String Converted Board",}
 
