@@ -135,14 +135,11 @@ class ZeroAgent(Agent):
         total_n = node.total_visit_count
         sqrt_total_n = np.sqrt(total_n)
 
-        # Vectorized Q-value computation with warning suppression
         with np.errstate(divide='ignore', invalid='ignore'):
             q_values = np.where(node.visit_counts > 0, node.total_values / node.visit_counts, 0.0)
 
-        # Vectorized UCB score computation
         scores = q_values + self.c * node.priors * sqrt_total_n / (1 + node.visit_counts)
 
-        # Find the best move using np.argmax
         best_idx = np.argmax(scores)
         best_move_idx = node.legal_move_indices[best_idx]
         return node.encoder.decode_move_index(best_move_idx)
@@ -172,7 +169,7 @@ class ZeroAgent(Agent):
         if np.sum(masked_priors) > 0:
             masked_priors /= np.sum(masked_priors)
         else:
-            masked_priors[legal_moves_mask] = 1.0 / np.sum(legal_moves_mask)
+            masked_priors[legal_moves_mask] = 1.0 / max(1, np.sum(legal_moves_mask))
 
         move_priors = {
             self.encoder.decode_move_index(idx): p
@@ -207,7 +204,7 @@ class ZeroAgent(Agent):
 
             while True:  # work down the tree until we hit a leaf node
                 if not node.moves():
-                    print("No legal moves available, breaking out of the loop.")
+                    print(f"No legal moves available, win for {node.state.next_player.other}.")
                     break
 
                 move = self.select_branch(node)
@@ -220,11 +217,9 @@ class ZeroAgent(Agent):
 
             parent_node = node
 
-            if parent_node.state.is_over():  # we have reached a terminal state
+            if parent_node.state.is_over():  # Reached a terminal state
                 player_at_terminal_node = parent_node.state.next_player.other
                 winner = parent_node.state.winner
-
-
                 if winner is None:
                     value = 0.0
                 elif winner == player_at_terminal_node:

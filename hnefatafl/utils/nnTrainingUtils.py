@@ -1,6 +1,7 @@
 import torch
-import numpy as np
 import time
+from dataclasses import dataclass
+import numpy as np
 
 from hnefatafl.core.gamestate_v2 import GameState
 from hnefatafl.core.gameTypes import Player
@@ -8,6 +9,42 @@ from hnefatafl.core.gameTypes import Player
 def clip_probs(probs, max_prob=0.999):
     clipped_probs =  torch.clamp(probs, min=0, max=max_prob)
     return clipped_probs / clipped_probs.sum(dim=-1, keepdim=True)
+
+@dataclass(frozen=True)
+class ProgressiveMCTSConfigs:
+    depths: list[int]
+    initial_probs: list[float]
+    final_probs: list[float]
+    total_gens: int
+
+    def __post_init__(self):
+        if not (len(self.depths) == len(self.initial_probs) == len(self.final_probs)):
+            raise ValueError("depths, initial_probs, and final_probs must have the same length.")
+
+        for name, probs in ("initial_probs", self.initial_probs), ("final_probs", self.final_probs):
+            s = sum(probs)
+            if not np.isclose(s, 1.0, atol=1e-8):
+                raise ValueError(f"{name} must sum to 1.0, but got {s:.6f}.")
+
+    def sample(self, gen, schedule="linear"):
+        gen = min(max(gen, 0), self.total_gens) # Ensure generation is greater than 0 but less than total_gens
+        t = gen / self.total_gens
+
+        if schedule == "exp":
+            alpha = 1 - np.exp(-5*t)
+        elif schedule == "log":
+            alpha = np.log1p(t * (np.e - 1))
+        elif schedule == "quadratic":
+            alpha = t ** 2
+        elif schedule == "linear":
+            alpha = t
+        else:
+            print(f"unknown scheduler {schedule}, using linear schedule.")
+            alpha = t
+
+        adjusted_probs = (1-alpha) * np.array(self.initial_probs) + alpha * np.array(self.final_probs)
+        adjusted_probs = adjusted_probs / adjusted_probs.sum()
+        return int(np.random.choice(self.depths, p=adjusted_probs))
 
 def simulate_game(black_player, white_player, board_size=11, max_moves=500, resign_threshold=0.95, temp= 1.0, verbose=False):
     game = GameState.new_game(board_size=board_size)
@@ -71,6 +108,7 @@ def simulate_game_simple(black_player, white_player, board_size=11, max_moves=25
             print("Maximum move limit reached, ending game now.")
             return game
     print(f"Game ended in {move_count} moves. Winner: {game.winner}, duplication detected:{game.repetition_hit}")
+    print(game.board)
     return game
 
 if __name__ == "__main__":
@@ -86,7 +124,8 @@ if __name__ == "__main__":
     from pathlib import Path
 
     project_root = Path(__file__).resolve().parents[1]
-    ckpt_path = project_root / "zero" / "lightning_logs" / "version_12" / "checkpoints" / "epoch=2-step=654.ckpt"
+    ckpt_path = project_root / "zero" / "lightning_logs" / "version_16" / "checkpoints" / "epoch=2-step=684.ckpt"
+    ckpt_path = "/Users/nickgault/PycharmProjects/hnefatafl/hnefatafl/models/checkpoints/model-epoch=02-total_loss=3.28.ckpt"
     profiler = cProfile.Profile()
 
     encoder = SevenPlaneEncoder(11)
@@ -105,6 +144,7 @@ if __name__ == "__main__":
         print("Black wins!")
     else:
         print("White wins!")
+
     profiler.disable()
     stats = pstats.Stats(profiler).sort_stats('tottime')
     stats.print_stats(20)

@@ -7,7 +7,7 @@ def main():
     game = GameState.new_game()
     bots = {
         Player.black: RandomAgent(),
-        Player.white: MCTSAgent(num_rounds=50, selection_strategy='value')
+        Player.white: RandomAgent(),
     }
 
     for i in range(5000):
