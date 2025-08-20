@@ -169,7 +169,7 @@ class ZeroAgent(Agent):
         if np.sum(masked_priors) > 0:
             masked_priors /= np.sum(masked_priors)
         else:
-            masked_priors[legal_moves_mask] = 1.0 / np.sum(legal_moves_mask)
+            masked_priors[legal_moves_mask] = 1.0 / max(1, np.sum(legal_moves_mask))
 
         move_priors = {
             self.encoder.decode_move_index(idx): p
@@ -204,7 +204,7 @@ class ZeroAgent(Agent):
 
             while True:  # work down the tree until we hit a leaf node
                 if not node.moves():
-                    print("No legal moves available, breaking out of the loop.")
+                    print(f"No legal moves available, win for {node.state.next_player.other}.")
                     break
 
                 move = self.select_branch(node)

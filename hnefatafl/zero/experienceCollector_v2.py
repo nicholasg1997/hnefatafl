@@ -31,7 +31,7 @@ class ZeroExperienceCollector:
 
     def get_dataloader(self, batch_size:int = 64):
         visit_sums = np.sum(self.visit_counts, axis=1, keepdims=True)
-        policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # add very small number to avoid 0 div
+        policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # add a small number to avoid 0 div
 
         states_tensor = torch.tensor(self.states, dtype=torch.float32)
         policy_tensor = torch.tensor(policy_targets, dtype=torch.float32)
@@ -103,10 +103,10 @@ class PersistentExperienceBuffer:
 
     def get_states(self):
         return {
-            'states': np.array(self.states),
-            'visit_counts': np.array(self.visit_counts),
-            'rewards': np.array(self.rewards),
-            'is_result': np.array(self.is_result)
+            'states': list(self.states),
+            'visit_counts': list(self.visit_counts),
+            'rewards': list(self.rewards),
+            'is_result': list(self.is_result)
         }
 
     def set_states(self, load_states):
