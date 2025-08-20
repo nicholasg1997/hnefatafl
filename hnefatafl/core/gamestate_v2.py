@@ -112,13 +112,21 @@ class GameState:
 
         return next_state
 
-    def is_over(self):
+    def is_over(self, verbose=False):
         if self.winner is not None:
-            #print(f"Terminal state: winner={self.winner}, move_count={self.move_count}, board:\n{self.board}")
+            if verbose:
+                print(f"Terminal state: winner={self.winner}, move_count={self.move_count}, board:\n{self.board}")
+            return True
+
+        if not self.get_legal_moves():
+            if verbose:
+                print(f"No legal moves left, game over for player {self.next_player}")
+            self.winner = self.next_player.other
             return True
 
         if self.move_count >= self.max_moves:
-            #print(f"Maximum move limit reached, game over for player {self.next_player.other}")
+            if verbose:
+                print(f"Maximum move limit reached, game over for player {self.next_player.other}")
             self.winner = Player.black
             self.repeating_player = self.next_player.other
             self.move_limit_hit = True
@@ -129,7 +137,8 @@ class GameState:
             repetition_count = sum(1 for pawn_hash, player in self.pawn_history if
                                    player == self.next_player.other and pawn_hash == current_pawn_hash)
             if repetition_count >= 2:
-                #print(f"repetition detected for player {self.next_player.other} by playing move {self.last_move}")
+                if verbose:
+                    print(f"Repetition detected for player {self.next_player.other} by playing move {self.last_move}")
                 self.winner = self.next_player
                 self.repetition_hit = True
                 self.repeating_player = self.next_player.other
@@ -137,7 +146,8 @@ class GameState:
 
         current_hash = (self.board.grid.tobytes(), self.next_player)
         if self.history[current_hash] >= 3:
-            #print(f"repetition detected, game over for player {self.next_player.other}")
+            if verbose:
+                print(f"repetition detected, game over for player {self.next_player.other}")
             self.winner = self.next_player
             self.repetition_hit = True
             self.repeating_player = self.next_player.other
@@ -145,11 +155,14 @@ class GameState:
 
         king_pos = self.find_king()
         if self._is_king_captured(king_pos):
-            #print(f"King captured, game over for player White")
+            if verbose:
+                print(f"King captured, game over for player White")
             self.winner = Player.black
             return True
 
         if king_pos is None: # redundant check just in case
+            if verbose:
+                print("No king found, game over for player White")
             self.winner = Player.black
             return True
 
@@ -157,26 +170,28 @@ class GameState:
         corners = [Point(0, 0), Point(0, size - 1), Point(size - 1, 0), Point(size - 1, size - 1)]
 
         if king_pos in corners:
+            if verbose:
+                print(f"King reached a corner, game over for player {self.next_player.other} at position {king_pos}")
             self.winner = Player.white
-            #print(f"King reached a corner, game over for player {self.next_player.other}. used move {self.last_move}")
             return True
 
         if self._is_fortress():
+            if verbose:
+                print(f"White is stuck in a fortress, game over for player {self.next_player.other}")
             self.winner = Player.black
-            #print(f"White is stuck in a fortress, game over for player {self.next_player.other}")
             return True
 
         flattened_board = self.board.grid.flatten()
         counts = Counter(flattened_board)
         if counts[WHITE_PAWN] == 0 and counts[KING] == 0:
+            if verbose:
+                print("No white pawns or king left, game over for player Black")
             self.winner = Player.black
             return True
         if counts[BLACK_PAWN] == 0:
+            if verbose:
+                print("No black pawns left, game over for player White")
             self.winner = Player.white
-            return True
-
-        if not self.get_legal_moves():
-            self.winner = self.next_player.other
             return True
 
         return False
@@ -231,6 +246,7 @@ class GameState:
         if not moves:
             print("No legal moves found.")
             print(self.board)
+            return []
 
 
         return [Move(Point(fr, fc), Point(tr, tc)) for fr, fc, tr, tc in moves]
@@ -340,8 +356,15 @@ class GameState:
 
 if __name__ == '__main__':
     # play a game with random legal moves
-    game = GameState.new_game()
+    game = GameState.new_game(board_size=11.2)
+    print(game.board)
     for i in range(1000):
+        if game.is_over(verbose=True):
+            print(f"Game over! Winner: {game.winner}")
+            print(game.board)
+            print(i)
+            break
+
         legal_moves = game.get_legal_moves()
         if not legal_moves:
             break  # No legal moves left, game over
@@ -350,8 +373,3 @@ if __name__ == '__main__':
         #print(game.board)
         #print(f"Next player: {game.next_player}, Last move: {game.last_move}, Winner: {game.winner}")
 
-        if game.is_over():
-            print(f"Game over! Winner: {game.winner}")
-            print(game.board)
-            print(i)
-            break
