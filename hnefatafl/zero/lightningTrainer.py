@@ -2,22 +2,20 @@ import gc
 import multiprocessing
 import os
 from functools import partial
-from itertools import chain
 from pathlib import Path
-
 import numpy as np
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
+import pickle
 
 from hnefatafl.core.gameTypes import Player
 from hnefatafl.encoders.advanced_encoder import SevenPlaneEncoder
 from hnefatafl.utils.nnTrainingUtils import simulate_game_simple as simulate_game
 from hnefatafl.utils.nnTrainingUtils import ProgressiveMCTSConfigs
 from hnefatafl.utils.statTracker import StatTracker
-from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, PersistentExperienceBuffer, \
-    ReplayBufferCheckpoint
+from hnefatafl.zero.experienceCollector_v2 import ZeroExperienceCollector, PersistentExperienceBuffer
 from hnefatafl.zero.lightning_network import DualNetwork
 from hnefatafl.zero.zeroagent_fast import ZeroAgent
 
@@ -67,6 +65,32 @@ def _run_self_play_game_worker(model_state_dict, encoder, sampler, current_gen, 
     }
     return c1, c2, game_stats
 
+def save_replay_buffer(buffer, path, create_path=True):
+    """
+    Save the replay buffer to a file.
+    :param buffer: The PersistentExperienceBuffer instance to save.
+    :param path: The file path where the buffer will be saved.
+    :param create_path: If True, create the directory if it does not exist.
+    """
+    if create_path:
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(".tmp")
+    with open(tmp_path, 'wb') as f:
+        pickle.dump(buffer.get_states(), f)
+    os.replace(tmp_path, path)
+    print(f"Replay buffer saved to {path}")
+
+def load_replay_buffer(path):
+    """
+    Load the replay buffer from a file.
+    :param path: The file path from which to load the buffer.
+    :return: A PersistentExperienceBuffer instance with the loaded data.
+    """
+    with open(path, 'rb') as f:
+        load_states = pickle.load(f)
+        return load_states
+
 #TODO: convert all the parameters to a config object
 def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
          batch_size=128, learning_rate=0.0001, max_moves=500):
@@ -76,27 +100,30 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
 
     encoder = SevenPlaneEncoder(board_size=11)
     current_model = DualNetwork(encoder=encoder, learning_rate=learning_rate, batch_size=batch_size)
-    persistent_buffer = PersistentExperienceBuffer(max_games=150_000)
+    persistent_buffer = PersistentExperienceBuffer(max_games=75_000)
     stat_tracker = StatTracker()
 
     start_generation = 0
-    wandb_run_id = None
-    latest_ckpt_path = checkpoints_dir / "last-v4.ckpt"
+    wandb_run_id = 42
+    latest_ckpt_path = checkpoints_dir / "last-v5.ckpt"
+    replay_buffer_path = project_root / "data" / "replay_buffer.pkl"
 
     if latest_ckpt_path.exists():
         print(f"Found checkpoint. Resuming training from: {latest_ckpt_path}")
         full_ckpt = torch.load(latest_ckpt_path, weights_only=False)
         current_model.load_state_dict(full_ckpt['state_dict'])
 
-        replay_callback = ReplayBufferCheckpoint(persistent_buffer)
-        replay_callback.on_load_checkpoint(None, None, full_ckpt)
+        try:
+            persistent_buffer.set_states(load_replay_buffer(replay_buffer_path))
+            print(f"Loaded {len(persistent_buffer)} games from replay buffer.")
+        except FileNotFoundError:
+            print(f"Replay buffer file not found at {replay_buffer_path}. Starting with an empty buffer.")
 
         start_generation = full_ckpt.get('current_generation', 0)
         wandb_run_id = full_ckpt.get('wandb_run_id')
         print(f"Resuming from generation {start_generation} with run ID {wandb_run_id}")
     else:
         print("No checkpoint found. Starting new training run.")
-        latest_ckpt_path = None
 
     mcts_config = ProgressiveMCTSConfigs(
         depths=[200, 400, 800, 1200],
@@ -135,6 +162,7 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
         game_stats_list = [res[2] for res in all_results]
 
         persistent_buffer.add_experience(collectors)
+        save_replay_buffer(persistent_buffer, project_root / "data" / "replay_buffer.pkl")
         for stats in game_stats_list:
             stat_tracker.log_game(stats)
 
@@ -166,7 +194,7 @@ def main(num_generations=20, num_self_play_games=200, num_training_epochs=3,
         trainer = pl.Trainer(
             max_epochs=num_training_epochs,
             logger=wandb_logger,
-            callbacks=[ReplayBufferCheckpoint(persistent_buffer), checkpoint_callback],
+            callbacks=[checkpoint_callback],
             enable_progress_bar=True,
             log_every_n_steps=10
         )
