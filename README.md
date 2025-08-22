@@ -8,29 +8,32 @@ The implementation uses PyTorch / PyTorch Lightning and multiprocessing for fast
 - Self-play loop with MCTS (ZeroAgent fast implementation)
 - Dual-head CNN policy/value network
 - Persistent experience buffer and iterative training
-- Optional Weights & Biases logging
+- Weights & Biases logging (requires login)
 
 ## Installation
 - Python: >= 3.10
-- Dependencies are defined in pyproject.toml.
+- This project uses uv for environment and dependency management (uv.lock is provided).
 
-Install in editable mode:
+Setup with uv:
 
 ```bash
-pip install -e .
+# install uv if needed: https://docs.astral.sh/uv/getting-started/installation/
+uv venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+uv sync  # installs all dependencies and the project itself
 ```
 
-Optional: set up Weights & Biases for logging
+Weights & Biases (required for training):
 
 ```bash
-pip install wandb && wandb login
+uv run wandb login
 ```
 
 ## Quick Start: Training
 The main training entry point is:
 
 ```bash
-python hnefatafl/zero/lightningTrainer.py
+uv run python hnefatafl/zero/lightningTrainer.py
 ```
 
 Key notes:
@@ -70,7 +73,7 @@ main(
 ## Tips
 - GPU: Training can run on CPU or GPU; ensure PyTorch detects CUDA if available and configure your environment accordingly.
 - Reproducibility: For strict reproducibility, seed numpy/torch and control multiprocessing seeds as needed.
-- Logging: Training uses a `WandbLogger` (project `hnefatafl-zero`); you can disable or configure as desired.
+- Logging: Training uses a `WandbLogger` (project `hnefatafl-zero`); you must be logged into Weights & Biases (`wandb login`).
 
 ## Acknowledgments
 - Inspired by AlphaGo Zero/AlphaZero and the book "Deep Learning and the Game of Go" by Max Pumperla and Kevin Ferguson.
