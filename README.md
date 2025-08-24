@@ -1,5 +1,3 @@
-Of course. Here is a README file for your project.
-
 # Hnefatafl AI
 
 This repository contains the source code for an AI that learns to play the ancient Norse board game, Hnefatafl. The project implements a sophisticated self-learning agent based on the principles of AlphaGo Zero.
