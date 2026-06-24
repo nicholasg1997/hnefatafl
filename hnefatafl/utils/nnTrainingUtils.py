@@ -129,8 +129,8 @@ if __name__ == "__main__":
     profiler = cProfile.Profile()
 
     encoder = SevenPlaneEncoder(11)
-    model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
-    #model = DualNetwork(encoder)
+    #model = DualNetwork.load_from_checkpoint(ckpt_path, encoder=encoder)
+    model = DualNetwork(encoder)
     model = model.to("cpu")
     model.eval()
 

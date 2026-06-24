@@ -22,7 +22,7 @@ from hnefatafl.utils.statTracker import StatTracker
 
 
 project_root = Path(__file__).resolve().parents[1]
-ckpt_path = project_root / "zero" / "lightning_logs" / "version_13" / "checkpoints" / "epoch=2-step=642.ckpt"
+ckpt_path = project_root / "zero" / "lightning_logs" / "version_16" / "checkpoints" / "epoch=2-step=684.ckpt"
 
 
 def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
@@ -36,11 +36,14 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
     Returns:
         tuple: Two ZeroExperienceCollector instances for black and white agents.
     """
-    step_penalty = 0.001
+    # One intra-op thread per worker: self-play is already parallelized across processes,
+    # so each process using its full thread pool oversubscribes the cores.
+    torch.set_num_threads(1)
 
     model = DualNetwork(encoder)
     model.load_state_dict(model_state_dict)
     model.to('cpu')
+    model.eval()  # Fix 1: BatchNorm must use running stats, not per-board batch stats, during self-play.
 
     black_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
     white_agent = ZeroAgent(model, encoder, rounds_per_move=mcts_rounds, c=np.sqrt(2))
@@ -55,16 +58,17 @@ def run_self_play_game(model_state_dict, encoder, mcts_rounds, max_moves, _):
 
     game = simulate_game(black_agent, white_agent, max_moves=max_moves, verbose=False)
     winner = game.winner
-    time_penalty = step_penalty * game.move_count
 
+    # Fix 4: use clean +/-1 / 0 outcome labels. No per-move time penalty muddying the value target;
+    # game length is already available to the network via the move-count channel.
     if winner == Player.black:
         print("Black wins!")
-        c1.complete_episode(1.0 - time_penalty, is_result=True)
-        c2.complete_episode(-1.0 + time_penalty, is_result=True)
+        c1.complete_episode(1.0, is_result=True)
+        c2.complete_episode(-1.0, is_result=True)
     elif winner == Player.white:
         print("White wins!!")
-        c1.complete_episode(-1.0 + time_penalty, is_result=True)
-        c2.complete_episode(1.0 - time_penalty, is_result=True)
+        c1.complete_episode(-1.0, is_result=True)
+        c2.complete_episode(1.0, is_result=True)
     else:
         print("Draw!")
         c1.complete_episode(0.0, is_result=False)
@@ -104,7 +108,9 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
     num_workers = max(1, os.cpu_count() - free_cores)
     print(f"Using {num_workers} worker processes for self-play.")
 
-    encoder = SevenPlaneEncoder(board_size)
+    # Fix 3: encoder max_moves must match the game's move cap, or the move-count channel
+    # saturates at 200 and the network cannot distinguish move 200 from move 499.
+    encoder = SevenPlaneEncoder(board_size, max_moves=max_moves)
     #model = DualNetwork(encoder, learning_rate=learning_rate)
     print("Loading model from checkpoint...")
     try:
@@ -160,5 +166,5 @@ def main(learning_rate=0.001, batch_size=16, num_generations=10,
 
 if __name__ == "__main__":
     multiprocessing.set_start_method('spawn', force=True)
-    main(num_generations=20, num_self_play_games=200, num_training_epochs=3, mcts_rounds=700, batch_size=128,
-         learning_rate=0.001, max_moves=200, model_save_freq=5)
+    main(num_generations=20, num_self_play_games=200, num_training_epochs=3, mcts_rounds=350, batch_size=128,
+         learning_rate=0.001, max_moves=500, model_save_freq=5)

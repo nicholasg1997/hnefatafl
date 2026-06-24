@@ -115,7 +115,9 @@ class SevenPlaneEncoder(Encoder):
             numpy array of shape (channels, board_height, board_width)
         """
         board_grid = game_state.board.grid
-        encoded = np.zeros((self.total_channels, self.board_size[0], self.board_size[1]))
+        # float32 (not the numpy default float64): halves replay-buffer memory and disk size,
+        # and matches the network's input dtype (torch.float32) so no upcast/copy is needed.
+        encoded = np.zeros((self.total_channels, self.board_size[0], self.board_size[1]), dtype=np.float32)
 
         channel_idx = 0
 

@@ -126,9 +126,11 @@ class GameState:
 
         if self.move_count >= self.max_moves:
             if verbose:
-                print(f"Maximum move limit reached, game over for player {self.next_player.other}")
-            self.winner = Player.black
-            self.repeating_player = self.next_player.other
+                print(f"Maximum move limit reached, game is a draw")
+            # Fix 2: a game that runs out the move clock is a DRAW (winner stays None),
+            # not an automatic black win. Returning True still ends the game because the
+            # move_count check above re-triggers on every subsequent is_over() call.
+            self.winner = None
             self.move_limit_hit = True
             return True
 

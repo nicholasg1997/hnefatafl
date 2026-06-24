@@ -3,100 +3,61 @@ import pytorch_lightning as pl
 import torch
 
 from hnefatafl.agents.agent import Agent
-from hnefatafl.core.gameTypes import Player
 
 
-def softmax(x)-> np.ndarray:
-    """
-    Compute the softmax of a vector.
-
-    :param x: Input array or vector.
-    :return: The softmax-transformed vector as a NumPy array.
-    """
+def softmax(x) -> np.ndarray:
+    """Compute the softmax of a vector (kept for backward compatibility)."""
     e_x = np.exp(x - np.max(x))
     return e_x / e_x.sum(axis=0)
 
-class Branch:
-    def __init__(self, prior):
-        self.prior = prior
-        self.visit_count = 0
-        self.total_value = 0.0
 
 class ZeroTreeNode:
-    def __init__(self, state, value, priors, parent, last_move):
+    """
+    A single MCTS node, stored with parallel arrays indexed by *legal-move position*.
+
+    Everything the search needs (priors, visit counts, values, children) is aligned to
+    the same index order as ``moves_list``, so the hot path navigates by integer index
+    and never re-encodes/decodes a Move. ``legal_move_indices`` is kept only so the final
+    visit-count vector can be scattered back into the full action space for the collector.
+    """
+
+    def __init__(self, state, value, legal_moves, legal_move_indices, priors, parent, last_move):
         self.state = state
-        self.value = value
+        self.value = value                      # NN value, from this node's player-to-move perspective
         self.parent = parent
         self.last_move = last_move
+        self.encoder_indices = legal_move_indices
+
+        self.moves_list = legal_moves           # list[Move], aligned with the arrays below
+        n = len(legal_moves)
+        self.priors = priors                    # np.float32[n], masked + normalized
+        self.visit_counts = np.zeros(n, dtype=np.int64)
+        self.total_values = np.zeros(n, dtype=np.float64)
+        self.children = [None] * n
         self.total_visit_count = 1
-        self.branches = {}
-        for move, p in priors.items():
-            self.branches[move] = Branch(p)
-        self.children = {}
 
-    def moves(self) -> list:
-        """Return a list of legal moves available from this node."""
-        return list(self.branches.keys())
-
-    def add_child(self, move, child_node):
-        """Add a child node for the given move."""
-        self.children[move] = child_node
-
-    def has_child(self, move) -> bool:
-        """Check if a child node exists for the given move."""
-        return move in self.children
-
-    def get_child(self, move) -> 'ZeroTreeNode':
-        """Get the child node for the given move."""
-        return self.children.get(move, None)
-
-    def record_visit(self, move, value):
-        self.total_visit_count += 1
-        self.branches[move].visit_count += 1
-        self.branches[move].total_value += value
-
-    def expected_value(self, move):
-        branch = self.branches.get(move, None)
-        if branch is None or branch.visit_count == 0:
-            return 0.0
-        return branch.total_value / branch.visit_count
-
-    def prior(self, move):
-        branch = self.branches.get(move, None)
-        if branch is None:
-            return 0.0
-        return branch.prior
-
-    def visit_count(self, move):
-        if move in self.branches:
-            return self.branches[move].visit_count
-        return 0
-
-    def is_leaf(self):
-        return len(self.children) == 0
+        # Cache terminality once; state.is_over() re-runs the (expensive) endgame checks
+        # every call when the game is NOT over.
+        self.is_terminal = state.is_over()
 
 
 class ZeroAgent(Agent):
     """
-    A ZeroAgent class for implementing Monte Carlo Tree Search (MCTS) based decision-making
-    with functions to train and evaluate moves within a game's decision tree.
+    Batched AlphaZero-style MCTS agent.
 
-    This class is designed to represent an intelligent agent that uses a neural network model
-    and MCTS for decision-making in games. The agent utilizes techniques such as priors,
-    state caching, value computation, temperature-based exploration, and Dirichlet noise
-    integration for effective exploration and exploitation during training and gameplay.
+    Each search "round" still corresponds to one simulation, but simulations are gathered
+    into batches: we descend to ``batch_size`` distinct leaves (using virtual loss to keep
+    the batch diverse), run a SINGLE network forward pass over all of them, then expand and
+    back-propagate. Batching is what makes a GPU/MPS device worthwhile -- one forward over 32
+    boards instead of 32 forwards over one board.
 
-    The agent supports setting up an experience collector, clearing the state cache,
-    constructing decision trees, and selecting optimal moves based on MCTS.
-
-    :ivar model: Reference to the neural network model utilized for move priors and value prediction.
-    :ivar encoder: Encoder used for converting game state and moves into tensor representations.
-    :ivar num_rounds: Number of rounds of tree search to perform for each move selection.
-    :ivar c: Exploration constant for balancing exploitation and exploration in tree search.
-    :ivar collector: Experience collector used for collecting gameplay data during training. Initialized as None.
-    :ivar device: Device (e.g., CPU or GPU) where computations are performed.
+    The model should already be on the desired device (CPU / cuda / mps); the agent reads the
+    device from the model's parameters and moves encoded states there for inference only.
     """
-    def __init__(self, model, encoder, rounds_per_move=1600, c=3.0, dirichlet_alpha=0.3, dirichlet_epsilon=0.25):
+
+    def __init__(self, model, encoder, rounds_per_move=800, c=1.5,
+                 dirichlet_alpha=0.3, dirichlet_epsilon=0.25,
+                 batch_size=32, virtual_loss=1.0):
         self.model = model
         self.encoder = encoder
         self.num_rounds = rounds_per_move
@@ -105,238 +66,191 @@ class ZeroAgent(Agent):
 
         self.dirichlet_alpha = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
+        self.batch_size = batch_size
+        self.virtual_loss = virtual_loss
+
         self.state_cache = {}
-
         self.device = next(self.model.parameters()).device
-        #print(f"Using device: {self.device}")
-
 
     def set_collector(self, collector):
-        """
-        Set the experience collector for this agent.
-        :param collector:
-        :return: None
-        """
         self.collector = collector
 
     def clear_cache(self):
-        """
-        Clears the state cache used for storing previously computed priors and values.
-        :return: None
-        """
         self.state_cache = {}
 
-    def select_branch(self, node):
+    # ------------------------------------------------------------------ helpers
+
+    @staticmethod
+    def _state_hash(game_state):
+        return hash(game_state.board.grid.tobytes() + bytes([game_state.next_player.value]))
+
+    def _evaluate(self, states):
         """
-        Selects the best branch from the available moves based on a scoring function.
+        Run the network on a list of GameStates and return a list of (priors, value) pairs,
+        where ``priors`` is the full-action-space softmax (np.float32) and ``value`` is a float.
 
-        The scoring function combines the expected value of the move (Q), the prior
-        probability (P), and the visit counts, adjusted by the total visits to
-        the node. This function is used to determine the most promising move
-        to explore further in a decision-making or game-playing algorithm.
-
-        If no moves are available, the function will notify the user and return None.
-
-        :param node: The current node for which to select the best move.
-        :return: The move with the highest score among the legal moves available
-            in the current node, or None if no moves are available.
+        De-duplicates within the batch and caches across the whole search, so the (single)
+        batched forward pass only sees states it has never scored before.
         """
-        total_n = node.total_visit_count
+        results = [None] * len(states)
+        unique_states = []
+        unique_targets = []      # parallel to unique_states: list of result-indices sharing that state
+        seen = {}
 
-        def score_branch(move):
-            q = node.expected_value(move)
-            p = node.prior(move)
-            n = node.visit_count(move)
-            return q + self.c * p * np.sqrt(total_n) / (1 + n)
+        for i, s in enumerate(states):
+            h = self._state_hash(s)
+            cached = self.state_cache.get(h)
+            if cached is not None:
+                results[i] = cached
+            elif h in seen:
+                unique_targets[seen[h]].append(i)
+            else:
+                seen[h] = len(unique_states)
+                unique_states.append((h, s))
+                unique_targets.append([i])
 
-        if not node.moves():
-            print("No legal moves available.")
-            return None
-        return max(node.moves(), key=score_branch)
-
-    def create_node(self, game_state, move=None, parent=None):
-        """
-        Creates a new node for the tree structure using the game state, move, and parent node.
-
-        This function either retrieves node priors and value from a cache or computes them
-        using an encoder and the model. From the computed or cached priors, a legal
-        move mask is applied and normalized priors for legal moves are determined.
-        The function then creates a new tree node and optionally links it to a parent node.
-
-        :param game_state: The current state of the game as passed to the node creation.
-        :type game_state: GameState
-        :param move: The move that leads to this state. Defaults to None.
-        :type move: Optional[Move]
-        :param parent: The parent node in the tree structure. Defaults to None.
-        :type parent: Optional[ZeroTreeNode]
-        :return: The newly created node with computed priors, value, and game state.
-        :rtype: ZeroTreeNode
-        """
-        # --- CACHE ---
-        state_hash = hash(str(game_state.board.grid.tobytes()) + str(game_state.next_player))
-
-        if state_hash in self.state_cache:
-            priors, value = self.state_cache[state_hash]
-        else:
-            state_tensor = self.encoder.encode(game_state)
-            model_input = torch.tensor(np.array([state_tensor]), dtype=torch.float32).to(self.device)
+        if unique_states:
+            batch = np.stack([self.encoder.encode(s) for _, s in unique_states])
+            model_input = torch.as_tensor(batch, dtype=torch.float32, device=self.device)
             with torch.no_grad():
-                raw_priors, values = self.model(model_input)
-            priors = softmax(raw_priors[0].detach().numpy())
-            value = values[0][0]
-            self.state_cache[state_hash] = (priors, value)
+                raw_priors, raw_values = self.model(model_input)
+                priors = torch.softmax(raw_priors, dim=1).cpu().numpy()
+                values = raw_values.squeeze(1).cpu().numpy()
 
-        legal_moves = game_state.get_legal_moves()
-        legal_moves_mask = np.zeros_like(priors, dtype=bool)
-        for m in legal_moves:
-            legal_moves_mask[self.encoder.encode_move(m)] = 1
+            for k, (h, _) in enumerate(unique_states):
+                entry = (priors[k], float(values[k]))
+                self.state_cache[h] = entry
+                for i in unique_targets[k]:
+                    results[i] = entry
 
-        masked_priors = priors * legal_moves_mask
+        return results
 
-        if np.sum(masked_priors) > 0:
-            masked_priors /= np.sum(masked_priors)
-        else:
-            masked_priors[legal_moves_mask] = 1.0 / np.sum(legal_moves_mask)
+    def _make_node(self, state, full_priors, value, parent, move):
+        """Build a node from a full-action-space prior vector, gathering it onto legal moves."""
+        legal_moves = state.get_legal_moves()
+        legal_indices = [self.encoder.encode_move(m) for m in legal_moves]
+        legal_priors = full_priors[legal_indices].astype(np.float32)
 
-        move_priors = {
-            self.encoder.decode_move_index(idx): p
-            for idx, p in enumerate(masked_priors)
-            if legal_moves_mask[idx]
-        }
+        total = legal_priors.sum()
+        if total > 0:
+            legal_priors /= total
+        elif len(legal_priors) > 0:
+            legal_priors[:] = 1.0 / len(legal_priors)
 
-        #move_priors = {self.encoder.decode_move_index(idx): p for idx, p in enumerate(priors) }
-        new_node = ZeroTreeNode(
-            game_state,
-            value,
-            move_priors,
-            parent,
-            move
-        )
-        if parent is not None:
-            parent.add_child(move, new_node)
-        return new_node
+        return ZeroTreeNode(state, value, legal_moves, legal_indices, legal_priors, parent, move)
+
+    def _select_child_idx(self, node):
+        """PUCT: pick the legal-move position maximizing Q + U."""
+        visits = node.visit_counts
+        with np.errstate(divide='ignore', invalid='ignore'):
+            q = np.where(visits > 0, node.total_values / visits, 0.0)
+        u = self.c * node.priors * np.sqrt(node.total_visit_count) / (1 + visits)
+        return int(np.argmax(q + u))
+
+    def _terminal_value(self, terminal_state, mover):
+        """Value of a finished game from the perspective of ``mover`` (the player who is to move
+        at the node whose edge we are scoring)."""
+        winner = terminal_state.winner
+        if winner is None:
+            return 0.0
+        return 1.0 if winner == mover else -1.0
+
+    def _backpropagate(self, path, value):
+        """
+        Walk the path leaf->root. For each edge we (a) undo the virtual loss applied during
+        descent and (b) add the real result. The +1 visit added during descent is the real
+        visit, so visit counts are NOT touched here -- only the value is corrected. This keeps
+        visit statistics exact, which matters because they become the policy target.
+        """
+        for node, idx in reversed(path):
+            node.total_values[idx] += self.virtual_loss + value
+            value = -value
+
+    # ------------------------------------------------------------------ search
 
     def select_move(self, game_state, temperature=1.0, add_noise=False):
-        """
-        Selects a move for the given game state using a Monte Carlo Tree Search (MCTS) process. This function utilizes
-        MCTS to compute and select the best move based on several rounds of simulation, taking into account
-        factors such as visit counts, value propagation through paths in the tree, and optional Dirichlet noise for
-        introducing exploration. The selected move corresponds to the optimal policy under the current search parameters.
+        full_priors, root_value = self._evaluate([game_state])[0]
+        root = self._make_node(game_state, full_priors, root_value, parent=None, move=None)
 
-        :param game_state: The current state of the game from which the move is to be selected. It allows access to
-            legal moves, applying a move to generate a new state, and determining if the game has reached a terminal state.
-        :param temperature: A parameter to control exploration versus exploitation during move selection.
-            Temperature of 0 results in greedy deterministic move selection, while higher values increase exploration.
-            Defaults to 1.0 for balanced exploration.
-        :param add_noise: Boolean indicating whether to add Dirichlet noise to the root policy for increased exploration.
-            Defaults to False. This is particularly useful during self-play to diversify learning.
-        :return: The selected move based on the MCTS process. Returns None if there are no legal moves available.
-        :rtype: Optional object corresponding to a valid move in the game's representation.
-        """
-        #self.clear_cache()
-        root = self.create_node(game_state)
+        if add_noise and self.dirichlet_alpha > 0 and len(root.moves_list) > 0:
+            noise = np.random.dirichlet([self.dirichlet_alpha] * len(root.moves_list))
+            root.priors = ((1 - self.dirichlet_epsilon) * root.priors
+                           + self.dirichlet_epsilon * noise).astype(np.float32)
 
-        if add_noise and self.dirichlet_alpha > 0:
-            moves = root.moves()
-            if moves:
-                noise = np.random.dirichlet([self.dirichlet_alpha] * len(moves))
-                for i, move in enumerate(moves):
-                    root.branches[move].prior = ((1 - self.dirichlet_epsilon) * root.branches[move].prior +
-                                                 self.dirichlet_epsilon * noise[i])
+        sims_done = 0
+        while sims_done < self.num_rounds:
+            this_batch = min(self.batch_size, self.num_rounds - sims_done)
+            expand_leaves = []   # (path, new_state, node, idx)
 
-        for _ in range(self.num_rounds):
-            node = root
-            path = []
+            for _ in range(this_batch):
+                sims_done += 1
+                node = root
+                path = []          # list[(node, child_idx)]
 
-            while True: # work down the tree until we hit a leaf node
-                if not node.moves():
-                    print("No legal moves available, breaking out of the loop.")
-                    break
+                while True:
+                    if node.is_terminal or len(node.moves_list) == 0:
+                        # Existing terminal node reached: score it directly.
+                        if path:
+                            mover = path[-1][0].state.next_player
+                            self._backpropagate(path, self._terminal_value(node.state, mover))
+                        break
 
-                move = self.select_branch(node)
+                    idx = self._select_child_idx(node)
+                    # Virtual loss: temporarily make this edge look visited-and-losing so the
+                    # other leaves in this batch are pushed toward different parts of the tree.
+                    node.visit_counts[idx] += 1
+                    node.total_values[idx] -= self.virtual_loss
+                    node.total_visit_count += 1
+                    path.append((node, idx))
 
-                if node.has_child(move):
-                    path.append((node, move))
-                    node = node.get_child(move)
-                else:
-                    break
-            #print(f"path length: {len(path)}")
+                    child = node.children[idx]
+                    if child is None:
+                        # Unexpanded edge: this is our expansion target.
+                        move = node.moves_list[idx]
+                        new_state = node.state.apply_move(move)
+                        if new_state.is_over():
+                            mover = node.state.next_player
+                            self._backpropagate(path, self._terminal_value(new_state, mover))
+                        else:
+                            expand_leaves.append((path, new_state, node, idx))
+                        break
 
-            parent_node = node
+                    node = child
 
-            if parent_node.state.is_over():  # we have reached a terminal state
-                print(f"Terminal state reached at move {parent_node.state.move_count}, evaluating outcome.")
-                current_player = parent_node.state.next_player.other
-                winner = parent_node.state.winner
+            if not expand_leaves:
+                continue
 
-                if winner == current_player: # Win
-                    value = 1.0
-                    print(
-                        f"Winning move found for {current_player}: {move}, value=1.0, path={[(n.state.move_count, m) for n, m in path]}")
-                    print(f"board:\n{parent_node.state.board}")
-                elif winner == current_player.other:  # Loss
-                    print(f"Move {parent_node.state.move_count}: Losing move found for {current_player.other}, value=-1.0, path={[(n.state.move_count, m) for n, m in path]}")
-                    value = -1.0
-                elif parent_node.state.move_limit_hit:
-                    if current_player == Player.white:
-                        value = -1.0
-                    else:
-                        value = 0.5
-                    #print(f"max moves reached for player {parent_node.state.next_player.other}, returning value {value}")
-                else: # Draw
-                    if parent_node.state.repeating_player == current_player:
-                        value = -0.5
-                    else:
-                        value = 0.0
-                #print(f"Move {parent_node.state.move_count}: Terminal state, winner={winner}, move_limit_hit={parent_node.state.move_limit_hit}, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
+            evaluations = self._evaluate([ns for _, ns, _, _ in expand_leaves])
+            for (path, new_state, node, idx), (child_priors, child_value) in zip(expand_leaves, evaluations):
+                child = self._make_node(new_state, child_priors, child_value, parent=node, move=node.moves_list[idx])
+                node.children[idx] = child
+                # child_value is from the child's player-to-move perspective; the edge belongs
+                # to ``node``'s player, so the value to back up is -child_value.
+                self._backpropagate(path, -child_value)
 
-            else:
-                new_state = parent_node.state.apply_move(move)
-                child_node = self.create_node(new_state, move=move, parent=parent_node)
-                path.append((parent_node, move))
-                value  = -child_node.value
-                #print(f"Move {parent_node.state.move_count}: Expanded to child, value={value}, path={[(n.state.move_count, m) for n, m in path]}")
-
-            for path_node, path_move in reversed(path):
-                #print(f"Recording visit for move {path_move} with value {value}")
-                path_node.record_visit(path_move, value)
-                value = -value
-
-            #print(f"path length: {len(path)}")
-            #print(f"tree depth: {len(root.branches)}")
-
+        # Record the search policy (visit counts scattered into the full action space).
         if self.collector is not None:
-            visit_counts = np.zeros(self.encoder.num_moves())
-            for move, branch in root.branches.items():
-                move_idx = self.encoder.encode_move(move)
-                visit_counts[move_idx] = branch.visit_count
-            encoded_state = self.encoder.encode(game_state)
-            self.collector.record_decision(encoded_state, visit_counts)
+            visit_counts = np.zeros(self.encoder.num_moves(), dtype=np.float32)
+            for move_idx, count in zip(root.encoder_indices, root.visit_counts):
+                visit_counts[move_idx] = count
+            self.collector.record_decision(self.encoder.encode(game_state), visit_counts)
 
-        if not root.moves():
+        if len(root.moves_list) == 0:
             print("No legal moves available, returning None.")
             return None
 
         if temperature == 0:
-            #print(f"path length: {len(root.branches)}")
-            return max(root.moves(), key=lambda m: root.visit_count(m))
+            return root.moves_list[int(np.argmax(root.visit_counts))]
+
+        counts = root.visit_counts.astype(np.float32)
+        if counts.sum() == 0:
+            probs = np.ones_like(counts) / len(counts)
         else:
-            moves = root.moves()
-            visit_counts = np.array([root.visit_count(m) for m in moves], dtype=np.float32)
-
-            if np.sum(visit_counts) == 0:
-                print(f"Warning: All visit counts are zero, returning random move. move: {parent_node.state.move_count+1}")
-                probs = np.ones_like(visit_counts)/len(visit_counts)
-            else:
-                probs = visit_counts ** (1 / temperature)
-                probs /= np.sum(probs)
-            #print(f"probs: {probs}")
-
-            move_idx = np.random.choice(len(moves), p=probs)
-            return moves[move_idx]
+            probs = counts ** (1.0 / temperature)
+            probs /= probs.sum()
+        return root.moves_list[np.random.choice(len(root.moves_list), p=probs)]
 
     def train(self, experience, batch_size, epochs):
-        # TODO: add early stopping, etc.
         dataloader = experience.get_dataloader(batch_size)
         trainer = pl.Trainer(max_epochs=epochs)
         trainer.fit(self.model, dataloader)

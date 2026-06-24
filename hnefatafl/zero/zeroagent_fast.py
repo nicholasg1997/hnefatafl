@@ -23,7 +23,15 @@ class Branch:
         self.total_value = 0.0
 
 class ZeroTreeNode:
-    def __init__(self, state, value, priors, parent, last_move, encoder):
+    def __init__(self, state, value, legal_moves, legal_move_indices, priors, parent, last_move, encoder):
+        """
+        legal_moves:         list[Move] for the current player (already computed by the caller).
+        legal_move_indices:  list[int] flat indices, aligned with legal_moves.
+        priors:              np.float32 array aligned with legal_moves (already masked + normalized).
+
+        The caller (create_node) computes these once, so this constructor does NO encoding,
+        decoding, or extra get_legal_moves() call -- those round-trips were the main hotspot.
+        """
         self.state = state
         self.value = value
         self.parent = parent
@@ -31,14 +39,14 @@ class ZeroTreeNode:
         self.total_visit_count = 1
         self.encoder = encoder
 
-        legal_moves = state.get_legal_moves()
-        self.legal_move_indices = [self.encoder.encode_move(m) for m in legal_moves]
-        self.move_to_idx = {idx: i for i, idx in enumerate(self.legal_move_indices)}
-        self.priors = np.array([priors[m] for m in legal_moves], dtype=np.float32)
-        self.visit_counts = np.zeros(len(legal_moves), dtype=int)
-        self.total_values = np.zeros(len(legal_moves), dtype=float)
-        self.children = [None] * len(legal_moves)
-        self.moves_list = [self.encoder.decode_move_index(idx) for idx in self.legal_move_indices]
+        self.moves_list = legal_moves
+        self.legal_move_indices = legal_move_indices
+        self.move_to_idx = {idx: i for i, idx in enumerate(legal_move_indices)}
+        self.priors = priors
+        n = len(legal_moves)
+        self.visit_counts = np.zeros(n, dtype=int)
+        self.total_values = np.zeros(n, dtype=float)
+        self.children = [None] * n
 
     def moves(self):
         return self.moves_list
@@ -141,8 +149,8 @@ class ZeroAgent(Agent):
         scores = q_values + self.c * node.priors * sqrt_total_n / (1 + node.visit_counts)
 
         best_idx = np.argmax(scores)
-        best_move_idx = node.legal_move_indices[best_idx]
-        return node.encoder.decode_move_index(best_move_idx)
+        # moves_list already holds the decoded Move at this position; no need to decode again.
+        return node.moves_list[best_idx]
 
     def create_node(self, game_state, move=None, parent=None):
         state_hash = hash(str(game_state.board.grid.tobytes()) + str(game_state.next_player))
@@ -156,31 +164,27 @@ class ZeroAgent(Agent):
                 raw_priors, values = self.model(model_input)
             #priors = softmax(raw_priors[0].detach().numpy())
             priors = torch.softmax(raw_priors[0], dim=0).detach().cpu().numpy()
-            value = values[0][0]
+            value = float(values[0][0])
             self.state_cache[state_hash] = (priors, value)
 
+        # Gather priors directly onto the legal moves instead of building a full
+        # action-space (num_moves wide) mask + dict keyed by decoded Move objects.
         legal_moves = game_state.get_legal_moves()
-        legal_moves_mask = np.zeros_like(priors, dtype=bool)
-        for m in legal_moves:
-            legal_moves_mask[self.encoder.encode_move(m)] = 1
+        legal_move_indices = [self.encoder.encode_move(m) for m in legal_moves]
+        legal_priors = priors[legal_move_indices].astype(np.float32)
 
-        masked_priors = priors * legal_moves_mask
-
-        if np.sum(masked_priors) > 0:
-            masked_priors /= np.sum(masked_priors)
+        total = legal_priors.sum()
+        if total > 0:
+            legal_priors /= total
         else:
-            masked_priors[legal_moves_mask] = 1.0 / max(1, np.sum(legal_moves_mask))
-
-        move_priors = {
-            self.encoder.decode_move_index(idx): p
-            for idx, p in enumerate(masked_priors)
-            if legal_moves_mask[idx]
-        }
+            legal_priors[:] = 1.0 / max(1, len(legal_priors))
 
         new_node = ZeroTreeNode(
             game_state,
             value,
-            move_priors,
+            legal_moves,
+            legal_move_indices,
+            legal_priors,
             parent,
             move,
             self.encoder

@@ -58,14 +58,16 @@ class ZeroExperienceBuffer:
         visit_sums = np.sum(self.visit_counts, axis=1, keepdims=True)
         policy_targets = np.array(self.visit_counts) / (visit_sums + 1e-8)  # Add small number to avoid 0 division error
 
-        #TODO: select moves that result in a win for black more often
+        # Fix 2: prioritize decisive games over draws, but treat black wins and white wins
+        # equally. The previous 1.5 / 0.7 split upsampled black wins and reinforced the
+        # color bias that came from scoring timeouts as black wins.
         priorities = np.zeros(len(self.states), dtype=np.float32)
         black_win_mask = (self.rewards >= 0.5) & (self.is_result)
         white_win_mask = (self.rewards <= -0.5) & (self.is_result)
         draw_mask = ~self.is_result | (np.abs(self.rewards) < 0.5)
-        priorities[black_win_mask] = 1.5
-        priorities[white_win_mask] = 0.7
-        priorities[draw_mask] = 0.3
+        priorities[black_win_mask] = 1.0
+        priorities[white_win_mask] = 1.0
+        priorities[draw_mask] = 0.5
 
         priorities = np.power(priorities, priority_alpha)
         priorities /= np.sum(priorities + 1e-8)
